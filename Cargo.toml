@@ -1,0 +1,12 @@
+cargo-features = ["edition2024"]
+[package]
+name = "ambient-auction-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ambient-auction-api = { path = "../auction-api" }
+lz4_flex = "0.11.5"
+solana-sdk = "2.3.1"
+solana-system-interface = "1.0.0"
+solana-vote-interface = "2.2.6"
