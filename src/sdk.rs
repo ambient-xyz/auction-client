@@ -357,12 +357,26 @@ pub fn close_request(
     job_request_key: Pubkey,
     bundle_payer: Pubkey,
     bundle_key: Pubkey,
+    context_length_tier: RequestTier,
+    expiry_duration_tier: RequestTier,
 ) -> Instruction {
+    let context_length_tier_bytes = (context_length_tier as u64).to_le_bytes();
+    let expiry_duration_tier_bytes = (expiry_duration_tier as u64).to_le_bytes();
+    let (registry, _) = Pubkey::find_program_address(
+        &[
+            BUNDLE_REGISTRY_SEED,
+            context_length_tier_bytes.as_ref(),
+            expiry_duration_tier_bytes.as_ref(),
+        ],
+        &program_id,
+    );
+
     let account_metas = CloseRequestAccounts {
         request_authority: &AccountMeta::new(request_authority, true),
         job_request: &AccountMeta::new(job_request_key, false),
         bundle_payer: &AccountMeta::new(bundle_payer, false),
         bundle: &AccountMeta::new(bundle_key, false),
+        registry: &AccountMeta::new(registry, false),
     };
 
     Instruction {
