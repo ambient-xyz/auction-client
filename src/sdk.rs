@@ -357,8 +357,12 @@ pub fn close_request(
     job_request_key: Pubkey,
     bundle_payer: Pubkey,
     bundle_key: Pubkey,
+    auction_key: Pubkey,
+    auction_payer: Pubkey,
     context_length_tier: RequestTier,
     expiry_duration_tier: RequestTier,
+    new_bundle_lamports: u64,
+    new_auction_lamports: u64,
 ) -> Instruction {
     let context_length_tier_bytes = (context_length_tier as u64).to_le_bytes();
     let expiry_duration_tier_bytes = (expiry_duration_tier as u64).to_le_bytes();
@@ -371,17 +375,34 @@ pub fn close_request(
         &program_id,
     );
 
+    let seeds: [&[u8]; 2] = [REQUEST_BUNDLE_SEED, &bundle_key.to_bytes()];
+    let (child_bundle_key, new_bundle_bump) = Pubkey::find_program_address(&seeds, &program_id);
+
+    let seeds: [&[u8]; 2] = [AUCTION_SEED, &child_bundle_key.to_bytes()];
+    let (child_auction_key, _) = Pubkey::find_program_address(&seeds, &program_id);
+
     let account_metas = CloseRequestAccounts {
         request_authority: &AccountMeta::new(request_authority, true),
         job_request: &AccountMeta::new(job_request_key, false),
         bundle_payer: &AccountMeta::new(bundle_payer, false),
         bundle: &AccountMeta::new(bundle_key, false),
         registry: &AccountMeta::new(registry, false),
+        auction: &AccountMeta::new(auction_key, false),
+        auction_payer: &AccountMeta::new(auction_payer, false),
+        child_bundle: &AccountMeta::new(child_bundle_key, false),
+        child_auction: &AccountMeta::new(child_auction_key, false),
+        // pay from the request authority
+        child_bundle_payer: &AccountMeta::new(request_authority, true),
     };
 
     Instruction {
         program_id,
-        data: CloseRequestArgs {}.to_bytes(),
+        data: CloseRequestArgs {
+            new_bundle_lamports,
+            new_auction_lamports,
+            new_bundle_bump: new_bundle_bump as u64,
+        }
+        .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
