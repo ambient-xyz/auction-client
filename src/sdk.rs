@@ -470,6 +470,8 @@ pub fn init_bundle(
         ],
         &program_id,
     );
+    let seeds: [&[u8]; 2] = [AUCTION_SEED, &bundle.to_bytes()];
+    let (auction, _) = Pubkey::find_program_address(&seeds, &program_id);
     let (registry, registry_bump) = Pubkey::find_program_address(
         &[
             BUNDLE_REGISTRY_SEED,
@@ -487,6 +489,7 @@ pub fn init_bundle(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
             false,
         ),
+        auction: &AccountMeta::new(auction, false),
     };
 
     Instruction {
