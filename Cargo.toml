@@ -13,3 +13,4 @@ solana-vote-interface = "2.2.6"
 
 [features]
 global-config = ["ambient-auction-api/global-config"]
+default = []
