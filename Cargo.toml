@@ -10,3 +10,7 @@ lz4_flex = "0.11.5"
 solana-sdk = "2.3.1"
 solana-system-interface = "1.0.0"
 solana-vote-interface = "2.2.6"
+
+[features]
+global-config = ["ambient-auction-api/global-config"]
+default = []
