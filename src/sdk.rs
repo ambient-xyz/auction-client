@@ -1,8 +1,10 @@
 use crate::ID as program_id;
+#[cfg(feature = "global-config")]
+use ambient_auction_api::constant::CONFIG_SEED;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    AUCTION_SEED, BID_SEED, BUNDLE_REGISTRY_SEED, CONFIG_SEED, JOB_REQUEST_SEED, MaybePubkey,
-    PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
+    AUCTION_SEED, BID_SEED, BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED, MaybePubkey, PUBKEY_BYTES,
+    REQUEST_BUNDLE_SEED, instruction::*,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
@@ -130,6 +132,7 @@ pub fn request_job(
         &program_id,
     );
 
+    #[cfg(feature = "global-config")]
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
 
     let accounts_infos = RequestJobAccounts {
@@ -138,6 +141,7 @@ pub fn request_job(
         registry: &AccountMeta::new(registry, false),
         input_data: &AccountMeta::new(input_data_account.unwrap_or_default(), false),
         system_program: &AccountMeta::new_readonly(solana_system_interface::program::ID, false),
+        #[cfg(feature = "global-config")]
         config: &AccountMeta::new(config_key, false),
         bundle_auction_account_pairs: bundles,
         last_bundle: &AccountMeta::new(last_bundle, false),
@@ -485,6 +489,7 @@ pub fn init_bundle(
     }
 }
 
+#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
 
