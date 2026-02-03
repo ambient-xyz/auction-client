@@ -359,7 +359,8 @@ pub fn close_bid(
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
-pub fn close_request(
+
+pub struct CloseRequest {
     request_authority: Pubkey,
     job_request_key: Pubkey,
     bundle_payer: Pubkey,
@@ -370,7 +371,21 @@ pub fn close_request(
     expiry_duration_tier: RequestTier,
     new_bundle_lamports: u64,
     new_auction_lamports: u64,
-) -> Instruction {
+}
+pub fn close_request(args: CloseRequest) -> Instruction {
+    let CloseRequest {
+        request_authority,
+        job_request_key,
+        bundle_payer,
+        bundle_key,
+        auction_key,
+        auction_payer,
+        context_length_tier,
+        expiry_duration_tier,
+        new_bundle_lamports,
+        new_auction_lamports,
+    } = args;
+
     let context_length_tier_bytes = (context_length_tier as u64).to_le_bytes();
     let expiry_duration_tier_bytes = (expiry_duration_tier as u64).to_le_bytes();
     let (registry, _) = Pubkey::find_program_address(
