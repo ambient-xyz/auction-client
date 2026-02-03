@@ -361,16 +361,16 @@ pub fn close_bid(
 }
 
 pub struct CloseRequest {
-    request_authority: Pubkey,
-    job_request_key: Pubkey,
-    bundle_payer: Pubkey,
-    bundle_key: Pubkey,
-    auction_key: Pubkey,
-    auction_payer: Pubkey,
-    context_length_tier: RequestTier,
-    expiry_duration_tier: RequestTier,
-    new_bundle_lamports: u64,
-    new_auction_lamports: u64,
+    pub request_authority: Pubkey,
+    pub job_request_key: Pubkey,
+    pub bundle_payer: Pubkey,
+    pub bundle_key: Pubkey,
+    pub auction_key: Pubkey,
+    pub auction_payer: Pubkey,
+    pub context_length_tier: RequestTier,
+    pub expiry_duration_tier: RequestTier,
+    pub new_bundle_lamports: u64,
+    pub new_auction_lamports: u64,
 }
 pub fn close_request(args: CloseRequest) -> Instruction {
     let CloseRequest {
