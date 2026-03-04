@@ -3,8 +3,8 @@ use crate::ID as program_id;
 use ambient_auction_api::constant::CONFIG_SEED;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    AUCTION_SEED, BID_SEED, BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED, MaybePubkey, PUBKEY_BYTES,
-    REQUEST_BUNDLE_SEED, instruction::*,
+    AUCTION_SEED, AUCTION_VERIFIERS_SEED, BID_SEED, BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED,
+    MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
@@ -500,6 +500,26 @@ pub fn init_bundle(
             registry_lamports,
         }
         .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn init_auction_verifiers(payer: Pubkey) -> Instruction {
+    let (auction_verifiers, _) =
+        Pubkey::find_program_address(&[AUCTION_VERIFIERS_SEED], &program_id);
+
+    let account_metas = InitAuctionVerifiersAccounts {
+        payer: &AccountMeta::new(payer, true),
+        auction_verifiers: &AccountMeta::new(auction_verifiers, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id,
+        data: InitAuctionVerifiersArgs {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
