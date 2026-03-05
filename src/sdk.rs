@@ -524,6 +524,27 @@ pub fn init_auction_verifiers(payer: Pubkey) -> Instruction {
     }
 }
 
+pub fn update_verifier(vote_account: Pubkey, vote_authority: Pubkey, tee_enabled: bool) -> Instruction {
+    let (auction_verifiers, _) =
+        Pubkey::find_program_address(&[AUCTION_VERIFIERS_SEED], &program_id);
+    #[cfg(feature = "global-config")]
+    let (config_key, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+
+    let account_metas = UpdateVerifierAccounts {
+        vote_account: &AccountMeta::new(vote_account, false),
+        vote_authority: &AccountMeta::new(vote_authority, true),
+        auction_verifiers: &AccountMeta::new(auction_verifiers, false),
+        #[cfg(feature = "global-config")]
+        config: &AccountMeta::new(config_key, false),
+    };
+
+    Instruction {
+        program_id,
+        data: UpdateVerifierArgs::new(tee_enabled).to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
 #[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
