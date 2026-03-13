@@ -3,8 +3,8 @@ use crate::ID as program_id;
 use ambient_auction_api::constant::CONFIG_SEED;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    AUCTION_SEED, AUCTION_VERIFIERS_SEED, BID_SEED, BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED,
-    MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
+    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED,
+    JOB_REQUEST_SEED, MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
@@ -504,47 +504,6 @@ pub fn init_bundle(
     }
 }
 
-pub fn init_auction_verifiers(payer: Pubkey) -> Instruction {
-    let (auction_verifiers, _) =
-        Pubkey::find_program_address(&[AUCTION_VERIFIERS_SEED], &program_id);
-
-    let account_metas = InitAuctionVerifiersAccounts {
-        payer: &AccountMeta::new(payer, true),
-        auction_verifiers: &AccountMeta::new(auction_verifiers, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id,
-        data: InitAuctionVerifiersArgs {}.to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
-}
-
-pub fn update_verifier(vote_account: Pubkey, vote_authority: Pubkey, tee_enabled: bool) -> Instruction {
-    let (auction_verifiers, _) =
-        Pubkey::find_program_address(&[AUCTION_VERIFIERS_SEED], &program_id);
-    #[cfg(feature = "global-config")]
-    let (config_key, _) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
-
-    let account_metas = UpdateVerifierAccounts {
-        vote_account: &AccountMeta::new(vote_account, false),
-        vote_authority: &AccountMeta::new(vote_authority, true),
-        auction_verifiers: &AccountMeta::new(auction_verifiers, false),
-        #[cfg(feature = "global-config")]
-        config: &AccountMeta::new(config_key, false),
-    };
-
-    Instruction {
-        program_id,
-        data: UpdateVerifierArgs::new(tee_enabled).to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
-}
-
 #[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
@@ -561,6 +520,205 @@ pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     Instruction {
         program_id,
         data: args.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn find_bundle_escrow_v2(
+    payer: Pubkey,
+    bundle_hash: [u8; 32],
+    bundle_version: u32,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            BUNDLE_ESCROW_V2_SEED,
+            payer.as_ref(),
+            bundle_hash.as_ref(),
+            bundle_version.to_le_bytes().as_ref(),
+        ],
+        &program_id,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn open_bundle_escrow_v2(
+    payer: Pubkey,
+    bundle_version: u32,
+    reward_tier: RequestTier,
+    bundle_hash: [u8; 32],
+    coordinator: Pubkey,
+    requester_refund_recipient: Pubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+    settlement_deadline_slot: u64,
+    result_deadline_slot: u64,
+    verification_deadline_slot: u64,
+    claim_deadline_slot: u64,
+) -> Instruction {
+    let bundle_escrow = find_bundle_escrow_v2(payer, bundle_hash, bundle_version);
+    let account_metas = OpenBundleEscrowV2Accounts {
+        payer: &AccountMeta::new(payer, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id,
+        data: OpenBundleEscrowV2Args {
+            bundle_version,
+            _reserved0: [0; 4],
+            reward_tier,
+            bundle_hash,
+            coordinator: coordinator.to_bytes(),
+            requester_refund_recipient: requester_refund_recipient.to_bytes(),
+            total_input_tokens,
+            max_output_tokens,
+            escrow_lamports,
+            settlement_deadline_slot,
+            result_deadline_slot,
+            verification_deadline_slot,
+            claim_deadline_slot,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn commit_auction_settlement_v2(
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    winner_vote_account: Pubkey,
+    auction_hash: [u8; 32],
+    winner_node_pubkey: Pubkey,
+    clearing_price_per_output_token: u64,
+) -> Instruction {
+    let account_metas = CommitAuctionSettlementV2Accounts {
+        coordinator: &AccountMeta::new(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        winner_vote_account: &AccountMeta::new(winner_vote_account, false),
+    };
+
+    Instruction {
+        program_id,
+        data: CommitAuctionSettlementV2Args {
+            auction_hash,
+            winner_node_pubkey: winner_node_pubkey.to_bytes(),
+            clearing_price_per_output_token,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn post_bundle_result_v2(
+    authority: Pubkey,
+    bundle_escrow: Pubkey,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+) -> Instruction {
+    let account_metas = PostBundleResultV2Accounts {
+        authority: &AccountMeta::new(authority, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+    };
+
+    Instruction {
+        program_id,
+        data: PostBundleResultV2Args {
+            result_hash,
+            posted_output_tokens,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn finalize_bundle_verification_v2(
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    winner_node: Pubkey,
+    requester_refund_recipient: Pubkey,
+    verification_hash: [u8; 32],
+    accepted_output_tokens: u64,
+    verdict: VerificationVerdictV2,
+    quorum_verifier_bitmap: u8,
+) -> Instruction {
+    let account_metas = FinalizeBundleVerificationV2Accounts {
+        coordinator: &AccountMeta::new(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        winner_node: &AccountMeta::new(winner_node, false),
+        requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
+        instructions_sysvar: &AccountMeta::new_readonly(solana_sdk::sysvar::instructions::ID, false),
+    };
+
+    Instruction {
+        program_id,
+        data: FinalizeBundleVerificationV2Args {
+            verification_hash,
+            accepted_output_tokens,
+            verdict,
+            quorum_verifier_bitmap,
+            _reserved: [0; 6],
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn claim_winner_lstake_v2(
+    bundle_escrow: Pubkey,
+    winner_vote_account: Pubkey,
+    vote_authority: Pubkey,
+) -> Instruction {
+    let account_metas = ClaimWinnerLstakeV2Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        winner_vote_account: &AccountMeta::new(winner_vote_account, false),
+        vote_program: &AccountMeta::new_readonly(Pubkey::new_from_array(vote::ID.to_bytes()), false),
+        vote_authority: &AccountMeta::new(vote_authority, true),
+    };
+
+    Instruction {
+        program_id,
+        data: ClaimWinnerLstakeV2Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn claim_verifier_lstake_v2(
+    bundle_escrow: Pubkey,
+    verifier_vote_account: Pubkey,
+    vote_authority: Pubkey,
+) -> Instruction {
+    let account_metas = ClaimVerifierLstakeV2Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        verifier_vote_account: &AccountMeta::new(verifier_vote_account, false),
+        vote_program: &AccountMeta::new_readonly(Pubkey::new_from_array(vote::ID.to_bytes()), false),
+        vote_authority: &AccountMeta::new(vote_authority, true),
+    };
+
+    Instruction {
+        program_id,
+        data: ClaimVerifierLstakeV2Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn expire_bundle_escrow_v2(
+    bundle_escrow: Pubkey,
+    requester_refund_recipient: Pubkey,
+) -> Instruction {
+    let account_metas = ExpireBundleEscrowV2Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
+    };
+
+    Instruction {
+        program_id,
+        data: ExpireBundleEscrowV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
