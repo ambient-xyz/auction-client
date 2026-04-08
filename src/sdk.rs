@@ -620,6 +620,7 @@ pub fn post_bundle_result_v2(
     let account_metas = PostBundleResultV2Accounts {
         authority: &AccountMeta::new(authority, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        bundle_verifier_page: None,
     };
 
     Instruction {
@@ -627,6 +628,11 @@ pub fn post_bundle_result_v2(
         data: PostBundleResultV2Args {
             result_hash,
             posted_output_tokens,
+            page_index: 0,
+            page_entry_count: 0,
+            _reserved: [0; 4],
+            page_entries: [ambient_auction_api::BundleVerifierPageV2Entry::default();
+                ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES],
         }
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
@@ -652,6 +658,7 @@ pub fn finalize_bundle_verification_v2(
             solana_sdk::sysvar::instructions::ID,
             false,
         ),
+        bundle_verifier_pages: &[],
     };
 
     Instruction {
@@ -703,6 +710,7 @@ pub fn claim_verifier_lstake_v2(
             false,
         ),
         vote_authority: &AccountMeta::new(vote_authority, true),
+        bundle_verifier_pages: &[],
     };
 
     Instruction {
