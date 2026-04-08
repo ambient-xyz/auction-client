@@ -3,13 +3,13 @@ use crate::ID as program_id;
 use ambient_auction_api::constant::CONFIG_SEED;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED,
-    MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
+    instruction::*, MaybePubkey, AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED,
+    BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES, REQUEST_BUNDLE_SEED,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
-    pubkey::{MAX_SEED_LEN, Pubkey},
+    pubkey::{Pubkey, MAX_SEED_LEN},
 };
 use solana_system_interface::program as system_program;
 use solana_vote_interface::program as vote;
@@ -614,12 +614,21 @@ pub fn commit_auction_settlement_v2(
 pub fn post_bundle_result_v2(
     authority: Pubkey,
     bundle_escrow: Pubkey,
+    bundle_verifier_page: Pubkey,
     result_hash: [u8; 32],
     posted_output_tokens: u64,
+    page_index: u16,
+    page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
 ) -> Instruction {
+    assert!(
+        page_entries.len() <= ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES,
+        "page entries exceed BundleVerifierPageV2 capacity"
+    );
+
     let account_metas = PostBundleResultV2Accounts {
         authority: &AccountMeta::new(authority, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        bundle_verifier_page: Some(&AccountMeta::new(bundle_verifier_page, false)),
     };
 
     Instruction {
@@ -627,6 +636,17 @@ pub fn post_bundle_result_v2(
         data: PostBundleResultV2Args {
             result_hash,
             posted_output_tokens,
+            page_index,
+            page_entry_count: page_entries.len() as u16,
+            _reserved: [0; 4],
+            page_entries: {
+                let mut entries = [ambient_auction_api::BundleVerifierPageV2Entry::default();
+                    ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES];
+                for (index, entry) in page_entries.iter().copied().enumerate() {
+                    entries[index] = entry;
+                }
+                entries
+            },
         }
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
@@ -642,7 +662,12 @@ pub fn finalize_bundle_verification_v2(
     accepted_output_tokens: u64,
     verdict: VerificationVerdictV2,
     quorum_verifier_bitmap: u8,
+    bundle_verifier_pages: &[Pubkey],
 ) -> Instruction {
+    let page_accounts: Vec<_> = bundle_verifier_pages
+        .iter()
+        .map(|page| AccountMeta::new(*page, false))
+        .collect();
     let account_metas = FinalizeBundleVerificationV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -652,6 +677,7 @@ pub fn finalize_bundle_verification_v2(
             solana_sdk::sysvar::instructions::ID,
             false,
         ),
+        bundle_verifier_pages: &page_accounts,
     };
 
     Instruction {
@@ -694,7 +720,12 @@ pub fn claim_verifier_lstake_v2(
     bundle_escrow: Pubkey,
     verifier_vote_account: Pubkey,
     vote_authority: Pubkey,
+    bundle_verifier_pages: &[Pubkey],
 ) -> Instruction {
+    let page_accounts: Vec<_> = bundle_verifier_pages
+        .iter()
+        .map(|page| AccountMeta::new(*page, false))
+        .collect();
     let account_metas = ClaimVerifierLstakeV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         verifier_vote_account: &AccountMeta::new(verifier_vote_account, false),
@@ -703,6 +734,7 @@ pub fn claim_verifier_lstake_v2(
             false,
         ),
         vote_authority: &AccountMeta::new(vote_authority, true),
+        bundle_verifier_pages: &page_accounts,
     };
 
     Instruction {
