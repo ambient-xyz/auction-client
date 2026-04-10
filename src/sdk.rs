@@ -1,10 +1,9 @@
 use crate::ID as program_id;
-#[cfg(feature = "global-config")]
-use ambient_auction_api::constant::CONFIG_SEED;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
     instruction::*, MaybePubkey, AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED,
-    BUNDLE_REGISTRY_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES, REQUEST_BUNDLE_SEED,
+    BUNDLE_REGISTRY_SEED, CONFIG_POLICY_V2_SEED, CONFIG_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES,
+    REQUEST_BUNDLE_SEED,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
@@ -504,7 +503,6 @@ pub fn init_bundle(
     }
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
 
@@ -520,6 +518,61 @@ pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     Instruction {
         program_id,
         data: args.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn find_config_policy_v2() -> Pubkey {
+    Pubkey::find_program_address(&[CONFIG_SEED, CONFIG_POLICY_V2_SEED], &program_id).0
+}
+
+pub fn init_config_policy_v2(
+    authority: Pubkey,
+    config_policy_lamports: u64,
+    mut policy: ambient_auction_api::ConfigPolicyV2,
+) -> Instruction {
+    let (config_key, _config_bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+    let config_policy = find_config_policy_v2();
+    policy.bump = 0;
+
+    let account_metas = InitConfigPolicyV2Accounts {
+        authority: &AccountMeta::new(authority, true),
+        config: &AccountMeta::new(config_key, false),
+        config_policy: &AccountMeta::new(config_policy, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id,
+        data: InitConfigPolicyV2Args {
+            config_policy_lamports,
+            policy,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn set_config_policy_v2(
+    authority: Pubkey,
+    mut policy: ambient_auction_api::ConfigPolicyV2,
+) -> Instruction {
+    let (config_key, _config_bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
+    let config_policy = find_config_policy_v2();
+    policy.bump = 0;
+
+    let account_metas = SetConfigPolicyV2Accounts {
+        authority: &AccountMeta::new(authority, true),
+        config: &AccountMeta::new(config_key, false),
+        config_policy: &AccountMeta::new(config_policy, false),
+    };
+
+    Instruction {
+        program_id,
+        data: SetConfigPolicyV2Args { policy }.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
@@ -554,9 +607,11 @@ pub fn open_bundle_escrow_v2(
     claim_deadline_slot: u64,
 ) -> Instruction {
     let bundle_escrow = find_bundle_escrow_v2(payer, bundle_hash, bundle_version);
+    let config_policy = find_config_policy_v2();
     let account_metas = OpenBundleEscrowV2Accounts {
         payer: &AccountMeta::new(payer, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new(config_policy, false),
         system_program: &AccountMeta::new_readonly(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
             false,
@@ -593,9 +648,11 @@ pub fn commit_auction_settlement_v2(
     winner_node_pubkey: Pubkey,
     clearing_price_per_output_token: u64,
 ) -> Instruction {
+    let config_policy = find_config_policy_v2();
     let account_metas = CommitAuctionSettlementV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new(config_policy, false),
         winner_vote_account: &AccountMeta::new(winner_vote_account, false),
     };
 
@@ -625,10 +682,12 @@ pub fn post_bundle_result_v2(
         "page entries exceed BundleVerifierPageV2 capacity"
     );
 
+    let config_policy = find_config_policy_v2();
     let account_metas = PostBundleResultV2Accounts {
         authority: &AccountMeta::new(authority, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         bundle_verifier_page: Some(&AccountMeta::new(bundle_verifier_page, false)),
+        config_policy: &AccountMeta::new(config_policy, false),
     };
 
     Instruction {
@@ -668,6 +727,7 @@ pub fn finalize_bundle_verification_v2(
         .iter()
         .map(|page| AccountMeta::new(*page, false))
         .collect();
+    let config_policy = find_config_policy_v2();
     let account_metas = FinalizeBundleVerificationV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -678,6 +738,7 @@ pub fn finalize_bundle_verification_v2(
             false,
         ),
         bundle_verifier_pages: &page_accounts,
+        config_policy: &AccountMeta::new(config_policy, false),
     };
 
     Instruction {
@@ -699,6 +760,7 @@ pub fn claim_winner_lstake_v2(
     winner_vote_account: Pubkey,
     vote_authority: Pubkey,
 ) -> Instruction {
+    let config_policy = find_config_policy_v2();
     let account_metas = ClaimWinnerLstakeV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         winner_vote_account: &AccountMeta::new(winner_vote_account, false),
@@ -707,6 +769,7 @@ pub fn claim_winner_lstake_v2(
             false,
         ),
         vote_authority: &AccountMeta::new(vote_authority, true),
+        config_policy: &AccountMeta::new(config_policy, false),
     };
 
     Instruction {
@@ -726,6 +789,7 @@ pub fn claim_verifier_lstake_v2(
         .iter()
         .map(|page| AccountMeta::new(*page, false))
         .collect();
+    let config_policy = find_config_policy_v2();
     let account_metas = ClaimVerifierLstakeV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         verifier_vote_account: &AccountMeta::new(verifier_vote_account, false),
@@ -735,6 +799,7 @@ pub fn claim_verifier_lstake_v2(
         ),
         vote_authority: &AccountMeta::new(vote_authority, true),
         bundle_verifier_pages: &page_accounts,
+        config_policy: &AccountMeta::new(config_policy, false),
     };
 
     Instruction {
@@ -748,9 +813,11 @@ pub fn expire_bundle_escrow_v2(
     bundle_escrow: Pubkey,
     requester_refund_recipient: Pubkey,
 ) -> Instruction {
+    let config_policy = find_config_policy_v2();
     let account_metas = ExpireBundleEscrowV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
+        config_policy: &AccountMeta::new(config_policy, false),
     };
 
     Instruction {
