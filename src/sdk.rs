@@ -1,14 +1,13 @@
 use crate::ID as program_id;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    instruction::*, MaybePubkey, AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED,
-    BUNDLE_REGISTRY_SEED, CONFIG_POLICY_V2_SEED, CONFIG_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES,
-    REQUEST_BUNDLE_SEED,
+    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED, CONFIG_POLICY_V2_SEED,
+    CONFIG_SEED, JOB_REQUEST_SEED, MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
-    pubkey::{Pubkey, MAX_SEED_LEN},
+    pubkey::{MAX_SEED_LEN, Pubkey},
 };
 use solana_system_interface::program as system_program;
 use solana_vote_interface::program as vote;
@@ -503,6 +502,7 @@ pub fn init_bundle(
     }
 }
 
+#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
 
@@ -531,13 +531,11 @@ pub fn init_config_policy_v2(
     config_policy_lamports: u64,
     mut policy: ambient_auction_api::ConfigPolicyV2,
 ) -> Instruction {
-    let (config_key, _config_bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
     let config_policy = find_config_policy_v2();
     policy.bump = 0;
 
     let account_metas = InitConfigPolicyV2Accounts {
         authority: &AccountMeta::new(authority, true),
-        config: &AccountMeta::new(config_key, false),
         config_policy: &AccountMeta::new(config_policy, false),
         system_program: &AccountMeta::new_readonly(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
@@ -560,13 +558,11 @@ pub fn set_config_policy_v2(
     authority: Pubkey,
     mut policy: ambient_auction_api::ConfigPolicyV2,
 ) -> Instruction {
-    let (config_key, _config_bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
     let config_policy = find_config_policy_v2();
     policy.bump = 0;
 
     let account_metas = SetConfigPolicyV2Accounts {
         authority: &AccountMeta::new(authority, true),
-        config: &AccountMeta::new(config_key, false),
         config_policy: &AccountMeta::new(config_policy, false),
     };
 
