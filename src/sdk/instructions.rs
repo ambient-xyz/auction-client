@@ -1,10 +1,6 @@
 use crate::ID as program_id;
 use ambient_auction_api::state::RequestTier;
-use ambient_auction_api::{
-    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED, CONFIG_POLICY_V2_SEED,
-    CONFIG_SEED, JOB_REQUEST_SEED, MaybePubkey, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
-};
-use solana_sdk::hash::hashv;
+use ambient_auction_api::{PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::{MAX_SEED_LEN, Pubkey},
@@ -13,6 +9,60 @@ use solana_system_interface::program as system_program;
 use solana_vote_interface::program as vote;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
+
+#[cfg(feature = "global-config")]
+use super::init_config_plan;
+use super::{
+    find_auction, find_bundle_registry, find_child_bundle, find_config_policy_v2, init_bundle_plan,
+    open_bundle_escrow_v2_plan, place_bid_plan, request_job_plan, reveal_bid_plan, submit_job_plan,
+};
+
+fn build_post_bundle_result_v2_instruction(
+    authority: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verifier_page: Option<Pubkey>,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+    page_index: u16,
+    page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
+) -> Instruction {
+    assert!(
+        page_entries.len() <= ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES,
+        "page entries exceed BundleVerifierPageV2 capacity"
+    );
+
+    let padded_page_entries = {
+        let mut entries = [ambient_auction_api::BundleVerifierPageV2Entry::default();
+            ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES];
+        for (index, entry) in page_entries.iter().copied().enumerate() {
+            entries[index] = entry;
+        }
+        entries
+    };
+
+    let bundle_verifier_page_meta = bundle_verifier_page.map(|page| AccountMeta::new(page, false));
+    let config_policy = find_config_policy_v2();
+    let account_metas = PostBundleResultV2Accounts {
+        authority: &AccountMeta::new(authority, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new(config_policy, false),
+        bundle_verifier_page: bundle_verifier_page_meta.as_ref(),
+    };
+
+    Instruction {
+        program_id,
+        data: PostBundleResultV2Args {
+            result_hash,
+            posted_output_tokens,
+            page_index,
+            page_entry_count: page_entries.len() as u16,
+            _reserved: [0; 4],
+            page_entries: padded_page_entries,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
 
 pub fn append_data(
     payer: Pubkey,
@@ -75,97 +125,25 @@ pub fn request_job(
     // TODO: this should be used not hardcoded
     _additional_bundles: Option<u64>,
 ) -> Instruction {
-    // This is the max allowed within the instruction limits
-    let additional_bundles = Some(8);
-    let seeds: [&[u8]; 2] = [AUCTION_SEED, &bundle_key.to_bytes()];
-    let (parent_auction_key, _parent_auction_bump) =
-        Pubkey::find_program_address(&seeds, &program_id);
-
-    let context_length_tier = (context_length_tier as u64).to_le_bytes();
-    let expiry_duration_tier = (expiry_duration_tier as u64).to_le_bytes();
-    let seeds: [&[u8]; 5] = [
-        JOB_REQUEST_SEED,
-        &context_length_tier,
-        &expiry_duration_tier,
-        &authority.to_bytes(),
-        &job_request_seed,
-    ];
-    let (job_request_key, bump) = Pubkey::find_program_address(&seeds, &program_id);
-
-    let seeds: [&[u8]; 2] = [REQUEST_BUNDLE_SEED, &bundle_key.to_bytes()];
-    let (new_bundle_key, _) = Pubkey::find_program_address(&seeds, &program_id);
-
-    let seeds: [&[u8]; 2] = [AUCTION_SEED, &new_bundle_key.to_bytes()];
-    let (child_auction_key, _) = Pubkey::find_program_address(&seeds, &program_id);
-
-    let mut bundles = vec![
-        AccountMeta::new(bundle_key, false),
-        AccountMeta::new(parent_auction_key, false),
-        AccountMeta::new(new_bundle_key, false),
-        AccountMeta::new(child_auction_key, false),
-    ];
-    let mut current_last = new_bundle_key;
-    if let Some(additions) = additional_bundles {
-        for _ in 0..additions {
-            let seeds: [&[u8]; 2] = [REQUEST_BUNDLE_SEED, &current_last.to_bytes()];
-            let (new_bundle_key, _) = Pubkey::find_program_address(&seeds, &program_id);
-
-            let seeds: [&[u8]; 2] = [AUCTION_SEED, &new_bundle_key.to_bytes()];
-            let (child_auction_key, _) = Pubkey::find_program_address(&seeds, &program_id);
-
-            bundles.push(AccountMeta::new(new_bundle_key, false));
-            bundles.push(AccountMeta::new(child_auction_key, false));
-            current_last = new_bundle_key;
-        }
-    }
-    let seeds: [&[u8]; 2] = [REQUEST_BUNDLE_SEED, &current_last.to_bytes()];
-    let (last_bundle, _) = Pubkey::find_program_address(&seeds, &program_id);
-
-    let (registry, _) = Pubkey::find_program_address(
-        &[
-            BUNDLE_REGISTRY_SEED,
-            context_length_tier.as_ref(),
-            expiry_duration_tier.as_ref(),
-        ],
-        &program_id,
-    );
-
-    #[cfg(feature = "global-config")]
-    let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
-
-    let accounts_infos = RequestJobAccounts {
-        payer: &AccountMeta::new(authority, true),
-        job_request: &AccountMeta::new(job_request_key, false),
-        registry: &AccountMeta::new(registry, false),
-        input_data: &AccountMeta::new(input_data_account.unwrap_or_default(), false),
-        system_program: &AccountMeta::new_readonly(solana_system_interface::program::ID, false),
-        #[cfg(feature = "global-config")]
-        config: &AccountMeta::new(config_key, false),
-        bundle_auction_account_pairs: bundles,
-        last_bundle: &AccountMeta::new(last_bundle, false),
-    };
-
-    let input_data_key: MaybePubkey = input_data_account.map(|key| key.to_bytes().into()).into();
-
-    Instruction {
-        program_id,
-        data: RequestJobArgs {
-            max_price_per_output_token,
-            authority: authority.to_bytes(),
-            input_hash,
-            job_request_seed,
-            new_bundle_lamports,
-            input_tokens,
-            bump: bump.into(),
-            max_output_tokens,
-            new_auction_lamports,
-            input_hash_iv: input_hash_iv.unwrap_or_default(),
-            input_data_account: input_data_key,
-        }
-        .to_bytes(),
-        accounts: accounts_infos.iter_owned().collect::<Vec<_>>(),
-    }
+    request_job_plan(
+        authority,
+        input_hash,
+        input_hash_iv,
+        job_request_seed,
+        input_tokens,
+        max_output_tokens,
+        new_bundle_lamports,
+        new_auction_lamports,
+        bundle_key,
+        max_price_per_output_token,
+        context_length_tier,
+        expiry_duration_tier,
+        input_data_account,
+        _additional_bundles,
+    )
+    .0
 }
+
 pub fn place_bid(
     authority: Pubkey,
     auction: Pubkey,
@@ -176,37 +154,17 @@ pub fn place_bid(
     endpoint: (IpAddr, u16),
     node_encryption_publickey: Option<[u8; 32]>,
 ) -> Instruction {
-    // use the bidder pubkey as seed for the price hash
-    // update reveal bid if this changes
-    let price_hash: [u8; 32] =
-        hashv(&[&price_hash_seed, &price_per_output_token.to_le_bytes()]).to_bytes();
-
-    let seeds: &[&[u8]] = &[BID_SEED, &auction.to_bytes(), &authority.to_bytes()];
-    let bid = Pubkey::find_program_address(seeds, &program_id).0;
-
-    let account_metas = PlaceBidAccounts {
-        payer: &AccountMeta::new(authority, true),
-        bid: &AccountMeta::new(bid, false),
-        auction: &AccountMeta::new(auction, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id,
-        data: PlaceBidArgs::new(
-            price_hash,
-            authority.to_bytes(),
-            endpoint.0.into(),
-            endpoint.1,
-            node_encryption_publickey,
-        )
-        .to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+    place_bid_plan(
+        authority,
+        auction,
+        price_per_output_token,
+        price_hash_seed,
+        endpoint,
+        node_encryption_publickey,
+    )
+    .0
 }
+
 pub fn reveal_bid(
     bidder_key: Pubkey,
     auction_key: Pubkey,
@@ -215,24 +173,17 @@ pub fn reveal_bid(
     vote_authority: Pubkey,
     args: RevealBidArgs,
 ) -> Instruction {
-    let seeds: &[&[u8]] = &[BID_SEED, &auction_key.to_bytes(), &bidder_key.to_bytes()];
-    let (bid, _) = Pubkey::find_program_address(seeds, &program_id);
-
-    let account_metas = RevealBidAccounts {
-        bid_authority: &AccountMeta::new(bidder_key, true),
-        bid: &AccountMeta::new(bid, false),
-        auction: &AccountMeta::new(auction_key, false),
-        bundle: &AccountMeta::new(bundle_key, false),
-        vote_account: &AccountMeta::new(vote_account, false),
-        vote_authority: &AccountMeta::new(vote_authority, true),
-    };
-
-    Instruction {
-        program_id,
-        data: args.to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+    reveal_bid_plan(
+        bidder_key,
+        auction_key,
+        bundle_key,
+        vote_account,
+        vote_authority,
+        args,
+    )
+    .0
 }
+
 #[allow(clippy::too_many_arguments)]
 pub fn submit_job(
     authority: Pubkey,
@@ -243,32 +194,18 @@ pub fn submit_job(
     // this is required if an input data account is used for the request
     output_data_account: Option<Pubkey>,
 ) -> Instruction {
-    let auction_key =
-        Pubkey::find_program_address(&[AUCTION_SEED, &bundle_key.to_bytes()], &program_id).0;
-    let bid_key = Pubkey::find_program_address(
-        &[BID_SEED, &auction_key.to_bytes(), authority.as_ref()],
-        &program_id,
+    submit_job_plan(
+        authority,
+        bundle_key,
+        job_request_key,
+        data,
+        output_data_account,
     )
-    .0;
-
-    let account_metas = SubmitJobOutputAccounts {
-        bid_authority: &AccountMeta::new(authority, true),
-        bundle: &AccountMeta::new(bundle_key, false),
-        job_request: &AccountMeta::new(job_request_key, false),
-        bid: &AccountMeta::new_readonly(bid_key, false),
-        auction: &AccountMeta::new_readonly(auction_key, false),
-        output_data_account: &AccountMeta::new(output_data_account.unwrap_or_default(), false),
-    };
-
-    Instruction {
-        program_id,
-        data: data.to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+    .0
 }
+
 pub fn end_auction(signer: Pubkey, bundle_key: Pubkey, vote_account: Pubkey) -> Instruction {
-    let auction_key =
-        Pubkey::find_program_address(&[AUCTION_SEED, &bundle_key.to_bytes()], &program_id).0;
+    let auction_key = find_auction(bundle_key);
 
     let account_metas = EndAuctionAccounts {
         auction: &AccountMeta::new(auction_key, false),
@@ -283,6 +220,7 @@ pub fn end_auction(signer: Pubkey, bundle_key: Pubkey, vote_account: Pubkey) -> 
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
+
 pub fn cancel_bundle(
     signer: Pubkey,
     // the parent of the bundle to be cancelled
@@ -293,18 +231,10 @@ pub fn cancel_bundle(
     expiry_duration_tier: RequestTier,
     bundle_lamports: u64,
 ) -> Instruction {
-    let context_length_tier_bytes = (context_length_tier as u64).to_le_bytes();
-    let expiry_duration_tier_bytes = (expiry_duration_tier as u64).to_le_bytes();
-    let (registry, _) = Pubkey::find_program_address(
-        &[
-            BUNDLE_REGISTRY_SEED,
-            context_length_tier_bytes.as_ref(),
-            expiry_duration_tier_bytes.as_ref(),
-        ],
-        &program_id,
-    );
-    let seeds = [REQUEST_BUNDLE_SEED, bundle_key.as_ref()];
-    let (child_bundle, child_bundle_bump) = Pubkey::find_program_address(&seeds, &program_id);
+    let registry = find_bundle_registry(context_length_tier, expiry_duration_tier);
+    let child_bundle = find_child_bundle(bundle_key);
+    let child_bundle_bump =
+        Pubkey::find_program_address(&[REQUEST_BUNDLE_SEED, bundle_key.as_ref()], &program_id).1;
 
     let account_metas = CancelBundleAccounts {
         payer: &AccountMeta::new(signer, true),
@@ -328,6 +258,7 @@ pub fn cancel_bundle(
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
+
 pub fn close_bid(
     bid_authority: Pubkey,
     auction_payer: Pubkey,
@@ -370,6 +301,7 @@ pub struct CloseRequest {
     pub new_bundle_lamports: u64,
     pub new_auction_lamports: u64,
 }
+
 pub fn close_request(args: CloseRequest) -> Instruction {
     let CloseRequest {
         request_authority,
@@ -384,22 +316,11 @@ pub fn close_request(args: CloseRequest) -> Instruction {
         new_auction_lamports,
     } = args;
 
-    let context_length_tier_bytes = (context_length_tier as u64).to_le_bytes();
-    let expiry_duration_tier_bytes = (expiry_duration_tier as u64).to_le_bytes();
-    let (registry, _) = Pubkey::find_program_address(
-        &[
-            BUNDLE_REGISTRY_SEED,
-            context_length_tier_bytes.as_ref(),
-            expiry_duration_tier_bytes.as_ref(),
-        ],
-        &program_id,
-    );
-
-    let seeds: [&[u8]; 2] = [REQUEST_BUNDLE_SEED, &bundle_key.to_bytes()];
-    let (child_bundle_key, new_bundle_bump) = Pubkey::find_program_address(&seeds, &program_id);
-
-    let seeds: [&[u8]; 2] = [AUCTION_SEED, &child_bundle_key.to_bytes()];
-    let (child_auction_key, _) = Pubkey::find_program_address(&seeds, &program_id);
+    let registry = find_bundle_registry(context_length_tier, expiry_duration_tier);
+    let child_bundle_key = find_child_bundle(bundle_key);
+    let new_bundle_bump =
+        Pubkey::find_program_address(&[REQUEST_BUNDLE_SEED, bundle_key.as_ref()], &program_id).1;
+    let child_auction_key = find_auction(child_bundle_key);
 
     let account_metas = CloseRequestAccounts {
         request_authority: &AccountMeta::new(request_authority, true),
@@ -426,6 +347,7 @@ pub fn close_request(args: CloseRequest) -> Instruction {
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
+
 pub fn submit_validation(
     bundle_key: Pubkey,
     vote_account: Pubkey,
@@ -460,70 +382,19 @@ pub fn init_bundle(
     // lamports used to initialize the bundle registry account
     registry_lamports: u64,
 ) -> Instruction {
-    let (bundle, bundle_bump) = Pubkey::find_program_address(
-        &[
-            REQUEST_BUNDLE_SEED,
-            (context_length_tier as u64).to_le_bytes().as_ref(),
-            (expiry_duration_tier as u64).to_le_bytes().as_ref(),
-        ],
-        &program_id,
-    );
-    let (registry, registry_bump) = Pubkey::find_program_address(
-        &[
-            BUNDLE_REGISTRY_SEED,
-            (context_length_tier as u64).to_le_bytes().as_ref(),
-            (expiry_duration_tier as u64).to_le_bytes().as_ref(),
-        ],
-        &program_id,
-    );
-
-    let account_metas = InitBundleAccounts {
-        payer: &AccountMeta::new(payer, true),
-        bundle: &AccountMeta::new(bundle, false),
-        registry: &AccountMeta::new(registry, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id,
-        data: InitBundleArgs {
-            context_length_tier,
-            expiry_duration_tier,
-            bundle_lamports,
-            bundle_bump: bundle_bump.into(),
-            registry_bump: registry_bump.into(),
-            registry_lamports,
-        }
-        .to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+    init_bundle_plan(
+        payer,
+        context_length_tier,
+        expiry_duration_tier,
+        bundle_lamports,
+        registry_lamports,
+    )
+    .0
 }
 
 #[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
-    let (config_key, _bump) = Pubkey::find_program_address(&[CONFIG_SEED], &program_id);
-
-    let account_metas = InitConfigAccounts {
-        payer: &AccountMeta::new(payer, true),
-        config: &AccountMeta::new(config_key, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id,
-        data: args.to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
-}
-
-pub fn find_config_policy_v2() -> Pubkey {
-    Pubkey::find_program_address(&[CONFIG_SEED, CONFIG_POLICY_V2_SEED], &program_id).0
+    init_config_plan(payer, args).0
 }
 
 pub fn init_config_policy_v2(
@@ -573,19 +444,6 @@ pub fn set_config_policy_v2(
     }
 }
 
-pub fn find_bundle_escrow_v2(payer: Pubkey, bundle_hash: [u8; 32], bundle_version: u32) -> Pubkey {
-    Pubkey::find_program_address(
-        &[
-            BUNDLE_ESCROW_V2_SEED,
-            payer.as_ref(),
-            bundle_hash.as_ref(),
-            bundle_version.to_le_bytes().as_ref(),
-        ],
-        &program_id,
-    )
-    .0
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn open_bundle_escrow_v2(
     payer: Pubkey,
@@ -602,38 +460,22 @@ pub fn open_bundle_escrow_v2(
     verification_deadline_slot: u64,
     claim_deadline_slot: u64,
 ) -> Instruction {
-    let bundle_escrow = find_bundle_escrow_v2(payer, bundle_hash, bundle_version);
-    let config_policy = find_config_policy_v2();
-    let account_metas = OpenBundleEscrowV2Accounts {
-        payer: &AccountMeta::new(payer, true),
-        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
-        config_policy: &AccountMeta::new(config_policy, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id,
-        data: OpenBundleEscrowV2Args {
-            bundle_version,
-            _reserved0: [0; 4],
-            reward_tier,
-            bundle_hash,
-            coordinator: coordinator.to_bytes(),
-            requester_refund_recipient: requester_refund_recipient.to_bytes(),
-            total_input_tokens,
-            max_output_tokens,
-            escrow_lamports,
-            settlement_deadline_slot,
-            result_deadline_slot,
-            verification_deadline_slot,
-            claim_deadline_slot,
-        }
-        .to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+    open_bundle_escrow_v2_plan(
+        payer,
+        bundle_version,
+        reward_tier,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+        settlement_deadline_slot,
+        result_deadline_slot,
+        verification_deadline_slot,
+        claim_deadline_slot,
+    )
+    .0
 }
 
 pub fn commit_auction_settlement_v2(
@@ -673,39 +515,32 @@ pub fn post_bundle_result_v2(
     page_index: u16,
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
 ) -> Instruction {
-    assert!(
-        page_entries.len() <= ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES,
-        "page entries exceed BundleVerifierPageV2 capacity"
-    );
+    build_post_bundle_result_v2_instruction(
+        authority,
+        bundle_escrow,
+        Some(bundle_verifier_page),
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entries,
+    )
+}
 
-    let config_policy = find_config_policy_v2();
-    let account_metas = PostBundleResultV2Accounts {
-        authority: &AccountMeta::new(authority, true),
-        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
-        bundle_verifier_page: Some(&AccountMeta::new(bundle_verifier_page, false)),
-        config_policy: &AccountMeta::new(config_policy, false),
-    };
-
-    Instruction {
-        program_id,
-        data: PostBundleResultV2Args {
-            result_hash,
-            posted_output_tokens,
-            page_index,
-            page_entry_count: page_entries.len() as u16,
-            _reserved: [0; 4],
-            page_entries: {
-                let mut entries = [ambient_auction_api::BundleVerifierPageV2Entry::default();
-                    ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES];
-                for (index, entry) in page_entries.iter().copied().enumerate() {
-                    entries[index] = entry;
-                }
-                entries
-            },
-        }
-        .to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
+pub fn post_bundle_result_v2_legacy(
+    authority: Pubkey,
+    bundle_escrow: Pubkey,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+) -> Instruction {
+    build_post_bundle_result_v2_instruction(
+        authority,
+        bundle_escrow,
+        None,
+        result_hash,
+        posted_output_tokens,
+        0,
+        &[],
+    )
 }
 
 pub fn finalize_bundle_verification_v2(
