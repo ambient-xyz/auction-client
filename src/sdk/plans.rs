@@ -396,10 +396,6 @@ pub fn open_bundle_escrow_v2_plan(
     total_input_tokens: u64,
     max_output_tokens: u64,
     escrow_lamports: u64,
-    settlement_deadline_slot: u64,
-    result_deadline_slot: u64,
-    verification_deadline_slot: u64,
-    claim_deadline_slot: u64,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
@@ -431,10 +427,6 @@ pub fn open_bundle_escrow_v2_plan(
                 total_input_tokens,
                 max_output_tokens,
                 escrow_lamports,
-                settlement_deadline_slot,
-                result_deadline_slot,
-                verification_deadline_slot,
-                claim_deadline_slot,
             }
             .to_bytes(),
             accounts: account_metas.iter_owned().collect::<Vec<_>>(),

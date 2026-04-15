@@ -27,13 +27,13 @@ fn build_post_bundle_result_v2_instruction(
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
 ) -> Instruction {
     assert!(
-        page_entries.len() <= ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES,
+        page_entries.len() <= ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES,
         "page entries exceed BundleVerifierPageV2 capacity"
     );
 
     let padded_page_entries = {
         let mut entries = [ambient_auction_api::BundleVerifierPageV2Entry::default();
-            ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES];
+            ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES];
         for (index, entry) in page_entries.iter().copied().enumerate() {
             entries[index] = entry;
         }
@@ -455,10 +455,6 @@ pub fn open_bundle_escrow_v2(
     total_input_tokens: u64,
     max_output_tokens: u64,
     escrow_lamports: u64,
-    settlement_deadline_slot: u64,
-    result_deadline_slot: u64,
-    verification_deadline_slot: u64,
-    claim_deadline_slot: u64,
 ) -> Instruction {
     open_bundle_escrow_v2_plan(
         payer,
@@ -470,10 +466,6 @@ pub fn open_bundle_escrow_v2(
         total_input_tokens,
         max_output_tokens,
         escrow_lamports,
-        settlement_deadline_slot,
-        result_deadline_slot,
-        verification_deadline_slot,
-        claim_deadline_slot,
     )
     .0
 }
