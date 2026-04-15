@@ -1,7 +1,7 @@
 use super::*;
 use ambient_auction_api::{
-    BundleVerifierPageV2Entry, InstructionAccounts, PlaceBidArgs, PostBundleResultV2Args,
-    RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    BundleVerifierPageV2Entry, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
+    PostBundleResultV2Args, RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
     instruction::Instruction,
@@ -345,10 +345,6 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         100,
         200,
         300,
-        400,
-        500,
-        600,
-        700,
     );
     let instruction = open_bundle_escrow_v2(
         payer,
@@ -360,10 +356,6 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         100,
         200,
         300,
-        400,
-        500,
-        600,
-        700,
     );
 
     assert_eq!(planned_instruction, instruction);
@@ -379,6 +371,11 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         owned_account_pubkeys(account_keys.as_accounts().iter_owned()),
         instruction_pubkeys(&instruction)
     );
+
+    let args = OpenBundleEscrowV2Args::try_from(&instruction.data[1..]).unwrap();
+    assert_eq!(args.total_input_tokens, 100);
+    assert_eq!(args.max_output_tokens, 200);
+    assert_eq!(args.escrow_lamports, 300);
 }
 
 #[test]
