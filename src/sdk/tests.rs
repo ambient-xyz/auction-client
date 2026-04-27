@@ -1,6 +1,7 @@
 use super::*;
 use ambient_auction_api::{
-    BundleVerifierPageV2Entry, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
+    BUNDLE_ESCROW_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
+    ConfigPolicyV2, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
     PostBundleResultV2Args, RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
@@ -45,6 +46,28 @@ fn owned_account_pubkeys(accounts: impl IntoIterator<Item = Pubkey>) -> Vec<Pubk
     accounts.into_iter().collect()
 }
 
+fn find_config_policy_for_program(program_id: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[CONFIG_SEED, CONFIG_POLICY_V2_SEED], &program_id).0
+}
+
+fn find_bundle_escrow_for_program(
+    program_id: Pubkey,
+    payer: Pubkey,
+    bundle_hash: [u8; 32],
+    bundle_version: u32,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            BUNDLE_ESCROW_V2_SEED,
+            payer.as_ref(),
+            bundle_hash.as_ref(),
+            bundle_version.to_le_bytes().as_ref(),
+        ],
+        &program_id,
+    )
+    .0
+}
+
 #[test]
 fn flexible_key_inputs_resolve_to_same_pubkeys() {
     let bundle = Pubkey::new_unique();
@@ -62,8 +85,8 @@ fn flexible_key_inputs_resolve_to_same_pubkeys() {
     let payer_bytes = payer.to_bytes();
     let bundle_hash = [3; 32];
     assert_eq!(
-        find_bundle_escrow_v2(payer, bundle_hash, 2),
-        find_bundle_escrow_v2(&payer_bytes, bundle_hash, 2)
+        find_bundle_escrow_v2(crate::ID, payer, bundle_hash, 2),
+        find_bundle_escrow_v2(crate::ID, &payer_bytes, bundle_hash, 2)
     );
 }
 
@@ -336,6 +359,7 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
     let bundle_hash = [4; 32];
 
     let (planned_instruction, account_keys) = open_bundle_escrow_v2_plan(
+        crate::ID,
         payer.to_bytes(),
         2,
         RequestTier::Pro,
@@ -347,6 +371,7 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         300,
     );
     let instruction = open_bundle_escrow_v2(
+        crate::ID,
         payer,
         2,
         RequestTier::Pro,
@@ -362,9 +387,9 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
     assert_eq!(account_keys.payer, payer);
     assert_eq!(
         account_keys.bundle_escrow,
-        find_bundle_escrow_v2(payer, bundle_hash, 2)
+        find_bundle_escrow_v2(crate::ID, payer, bundle_hash, 2)
     );
-    assert_eq!(account_keys.config_policy, find_config_policy_v2());
+    assert_eq!(account_keys.config_policy, find_config_policy_v2(crate::ID));
     assert_eq!(instruction.accounts[1].pubkey, account_keys.bundle_escrow);
     assert_eq!(instruction.accounts[2].pubkey, account_keys.config_policy);
     assert_eq!(
@@ -386,6 +411,7 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     let entry = sample_page_entry();
 
     let instruction = post_bundle_result_v2(
+        crate::ID,
         authority,
         bundle_escrow,
         bundle_verifier_page,
@@ -399,7 +425,10 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(instruction.accounts.len(), 4);
     assert_eq!(instruction.accounts[0].pubkey, authority);
     assert_eq!(instruction.accounts[1].pubkey, bundle_escrow);
-    assert_eq!(instruction.accounts[2].pubkey, find_config_policy_v2());
+    assert_eq!(
+        instruction.accounts[2].pubkey,
+        find_config_policy_v2(crate::ID)
+    );
     assert_eq!(instruction.accounts[3].pubkey, bundle_verifier_page);
     assert_eq!(args.result_hash, [8; 32]);
     assert_eq!(args.posted_output_tokens, 55);
@@ -413,13 +442,17 @@ fn post_bundle_result_v2_legacy_omits_page_account_and_uses_zero_page_fields() {
     let authority = Pubkey::new_unique();
     let bundle_escrow = Pubkey::new_unique();
 
-    let instruction = post_bundle_result_v2_legacy(authority, bundle_escrow, [9; 32], 66);
+    let instruction =
+        post_bundle_result_v2_legacy(crate::ID, authority, bundle_escrow, [9; 32], 66);
     let args = PostBundleResultV2Args::try_from(&instruction.data[1..]).unwrap();
 
     assert_eq!(instruction.accounts.len(), 3);
     assert_eq!(instruction.accounts[0].pubkey, authority);
     assert_eq!(instruction.accounts[1].pubkey, bundle_escrow);
-    assert_eq!(instruction.accounts[2].pubkey, find_config_policy_v2());
+    assert_eq!(
+        instruction.accounts[2].pubkey,
+        find_config_policy_v2(crate::ID)
+    );
     assert_eq!(args.result_hash, [9; 32]);
     assert_eq!(args.posted_output_tokens, 66);
     assert_eq!(args.page_index, 0);
@@ -429,4 +462,168 @@ fn post_bundle_result_v2_legacy_omits_page_account_and_uses_zero_page_fields() {
         [BundleVerifierPageV2Entry::default();
             ambient_auction_api::BUNDLE_VERIFIER_PAGE_V2_MAX_ENTRIES]
     );
+}
+
+#[test]
+fn v2_key_helpers_accept_explicit_program_id() {
+    let forced_program_id = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let bundle_hash = [4; 32];
+
+    let expected_config_policy = find_config_policy_for_program(forced_program_id);
+    let expected_bundle_escrow =
+        find_bundle_escrow_for_program(forced_program_id, payer, bundle_hash, 2);
+
+    assert_eq!(
+        find_config_policy_v2(forced_program_id),
+        expected_config_policy
+    );
+    assert_eq!(
+        find_bundle_escrow_v2(forced_program_id, payer, bundle_hash, 2),
+        expected_bundle_escrow
+    );
+    assert_ne!(find_config_policy_v2(crate::ID), expected_config_policy);
+    assert_ne!(
+        find_bundle_escrow_v2(crate::ID, payer, bundle_hash, 2),
+        expected_bundle_escrow
+    );
+}
+
+#[test]
+fn open_bundle_escrow_v2_plan_supports_explicit_program_id() {
+    let forced_program_id = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let coordinator = Pubkey::new_unique();
+    let requester_refund_recipient = Pubkey::new_unique();
+    let bundle_hash = [4; 32];
+
+    let (planned_instruction, account_keys) = open_bundle_escrow_v2_plan(
+        forced_program_id,
+        payer.to_bytes(),
+        2,
+        RequestTier::Pro,
+        bundle_hash,
+        &coordinator,
+        requester_refund_recipient.to_bytes(),
+        100,
+        200,
+        300,
+    );
+    let instruction = open_bundle_escrow_v2(
+        forced_program_id,
+        payer,
+        2,
+        RequestTier::Pro,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        100,
+        200,
+        300,
+    );
+    let expected_bundle_escrow =
+        find_bundle_escrow_for_program(forced_program_id, payer, bundle_hash, 2);
+    let expected_config_policy = find_config_policy_for_program(forced_program_id);
+
+    assert_eq!(planned_instruction, instruction);
+    assert_eq!(instruction.program_id, forced_program_id);
+    assert_eq!(account_keys.bundle_escrow, expected_bundle_escrow);
+    assert_eq!(account_keys.config_policy, expected_config_policy);
+    assert_eq!(instruction.accounts[1].pubkey, expected_bundle_escrow);
+    assert_eq!(instruction.accounts[2].pubkey, expected_config_policy);
+}
+
+#[test]
+fn v2_instruction_builders_accept_explicit_program_id() {
+    let forced_program_id = Pubkey::new_unique();
+    let expected_config_policy = find_config_policy_for_program(forced_program_id);
+    let authority = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+    let winner_vote_account = Pubkey::new_unique();
+    let winner_node = Pubkey::new_unique();
+    let refund_recipient = Pubkey::new_unique();
+    let verifier_page = Pubkey::new_unique();
+    let verifier_vote_account = Pubkey::new_unique();
+    let vote_authority = Pubkey::new_unique();
+
+    let init_config_policy =
+        init_config_policy_v2(forced_program_id, authority, 11, ConfigPolicyV2::default());
+    assert_eq!(init_config_policy.program_id, forced_program_id);
+    assert_eq!(
+        init_config_policy.accounts[1].pubkey,
+        expected_config_policy
+    );
+
+    let set_config_policy =
+        set_config_policy_v2(forced_program_id, authority, ConfigPolicyV2::default());
+    assert_eq!(set_config_policy.program_id, forced_program_id);
+    assert_eq!(set_config_policy.accounts[1].pubkey, expected_config_policy);
+
+    let commit = commit_auction_settlement_v2(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_vote_account,
+        [1; 32],
+        winner_node,
+        17,
+    );
+    assert_eq!(commit.program_id, forced_program_id);
+    assert_eq!(commit.accounts[2].pubkey, expected_config_policy);
+
+    let post = post_bundle_result_v2(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        verifier_page,
+        [2; 32],
+        19,
+        3,
+        &[sample_page_entry()],
+    );
+    assert_eq!(post.program_id, forced_program_id);
+    assert_eq!(post.accounts[2].pubkey, expected_config_policy);
+
+    let legacy_post =
+        post_bundle_result_v2_legacy(forced_program_id, authority, bundle_escrow, [3; 32], 23);
+    assert_eq!(legacy_post.program_id, forced_program_id);
+    assert_eq!(legacy_post.accounts[2].pubkey, expected_config_policy);
+
+    let finalize = finalize_bundle_verification_v2(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_node,
+        refund_recipient,
+        [4; 32],
+        29,
+        VerificationVerdictV2::Verified,
+        0b011,
+        &[verifier_page],
+    );
+    assert_eq!(finalize.program_id, forced_program_id);
+    assert_eq!(finalize.accounts[5].pubkey, expected_config_policy);
+
+    let claim_winner = claim_winner_lstake_v2(
+        forced_program_id,
+        bundle_escrow,
+        winner_vote_account,
+        vote_authority,
+    );
+    assert_eq!(claim_winner.program_id, forced_program_id);
+    assert_eq!(claim_winner.accounts[4].pubkey, expected_config_policy);
+
+    let claim_verifier = claim_verifier_lstake_v2(
+        forced_program_id,
+        bundle_escrow,
+        verifier_vote_account,
+        vote_authority,
+        &[verifier_page],
+    );
+    assert_eq!(claim_verifier.program_id, forced_program_id);
+    assert_eq!(claim_verifier.accounts[4].pubkey, expected_config_policy);
+
+    let expire = expire_bundle_escrow_v2(forced_program_id, bundle_escrow, refund_recipient);
+    assert_eq!(expire.program_id, forced_program_id);
+    assert_eq!(expire.accounts[2].pubkey, expected_config_policy);
 }

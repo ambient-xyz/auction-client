@@ -387,6 +387,7 @@ pub fn init_config_plan(
 
 #[allow(clippy::too_many_arguments)]
 pub fn open_bundle_escrow_v2_plan(
+    target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
     reward_tier: RequestTier,
@@ -402,8 +403,8 @@ pub fn open_bundle_escrow_v2_plan(
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
     let account_keys = OpenBundleEscrowV2AccountKeys {
         payer,
-        bundle_escrow: find_bundle_escrow_v2(payer, bundle_hash, bundle_version),
-        config_policy: find_config_policy_v2(),
+        bundle_escrow: find_bundle_escrow_v2(target_program_id, payer, bundle_hash, bundle_version),
+        config_policy: find_config_policy_v2(target_program_id),
         system_program: system_program_key(),
     };
 
@@ -416,7 +417,7 @@ pub fn open_bundle_escrow_v2_plan(
 
     (
         Instruction {
-            program_id,
+            program_id: target_program_id,
             data: OpenBundleEscrowV2Args {
                 bundle_version,
                 _reserved0: [0; 4],

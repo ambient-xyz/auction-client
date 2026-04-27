@@ -110,11 +110,12 @@ pub fn find_config() -> Pubkey {
     Pubkey::find_program_address(&[CONFIG_SEED], &program_id).0
 }
 
-pub fn find_config_policy_v2() -> Pubkey {
-    Pubkey::find_program_address(&[CONFIG_SEED, CONFIG_POLICY_V2_SEED], &program_id).0
+pub fn find_config_policy_v2(target_program_id: Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[CONFIG_SEED, CONFIG_POLICY_V2_SEED], &target_program_id).0
 }
 
 pub fn find_bundle_escrow_v2(
+    target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_hash: [u8; 32],
     bundle_version: u32,
@@ -127,7 +128,7 @@ pub fn find_bundle_escrow_v2(
             bundle_hash.as_ref(),
             bundle_version.to_le_bytes().as_ref(),
         ],
-        &program_id,
+        &target_program_id,
     )
     .0
 }

@@ -18,6 +18,7 @@ use super::{
 };
 
 fn build_post_bundle_result_v2_instruction(
+    target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
     bundle_verifier_page: Option<Pubkey>,
@@ -41,7 +42,7 @@ fn build_post_bundle_result_v2_instruction(
     };
 
     let bundle_verifier_page_meta = bundle_verifier_page.map(|page| AccountMeta::new(page, false));
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = PostBundleResultV2Accounts {
         authority: &AccountMeta::new(authority, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -50,7 +51,7 @@ fn build_post_bundle_result_v2_instruction(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: PostBundleResultV2Args {
             result_hash,
             posted_output_tokens,
@@ -398,11 +399,12 @@ pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
 }
 
 pub fn init_config_policy_v2(
+    target_program_id: Pubkey,
     authority: Pubkey,
     config_policy_lamports: u64,
     mut policy: ambient_auction_api::ConfigPolicyV2,
 ) -> Instruction {
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     policy.bump = 0;
 
     let account_metas = InitConfigPolicyV2Accounts {
@@ -415,7 +417,7 @@ pub fn init_config_policy_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: InitConfigPolicyV2Args {
             config_policy_lamports,
             policy,
@@ -426,10 +428,11 @@ pub fn init_config_policy_v2(
 }
 
 pub fn set_config_policy_v2(
+    target_program_id: Pubkey,
     authority: Pubkey,
     mut policy: ambient_auction_api::ConfigPolicyV2,
 ) -> Instruction {
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     policy.bump = 0;
 
     let account_metas = SetConfigPolicyV2Accounts {
@@ -438,7 +441,7 @@ pub fn set_config_policy_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: SetConfigPolicyV2Args { policy }.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
@@ -446,6 +449,7 @@ pub fn set_config_policy_v2(
 
 #[allow(clippy::too_many_arguments)]
 pub fn open_bundle_escrow_v2(
+    target_program_id: Pubkey,
     payer: Pubkey,
     bundle_version: u32,
     reward_tier: RequestTier,
@@ -457,6 +461,7 @@ pub fn open_bundle_escrow_v2(
     escrow_lamports: u64,
 ) -> Instruction {
     open_bundle_escrow_v2_plan(
+        target_program_id,
         payer,
         bundle_version,
         reward_tier,
@@ -471,6 +476,7 @@ pub fn open_bundle_escrow_v2(
 }
 
 pub fn commit_auction_settlement_v2(
+    target_program_id: Pubkey,
     coordinator: Pubkey,
     bundle_escrow: Pubkey,
     winner_vote_account: Pubkey,
@@ -478,7 +484,7 @@ pub fn commit_auction_settlement_v2(
     winner_node_pubkey: Pubkey,
     clearing_price_per_output_token: u64,
 ) -> Instruction {
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = CommitAuctionSettlementV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -487,7 +493,7 @@ pub fn commit_auction_settlement_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: CommitAuctionSettlementV2Args {
             auction_hash,
             winner_node_pubkey: winner_node_pubkey.to_bytes(),
@@ -499,6 +505,7 @@ pub fn commit_auction_settlement_v2(
 }
 
 pub fn post_bundle_result_v2(
+    target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
     bundle_verifier_page: Pubkey,
@@ -508,6 +515,7 @@ pub fn post_bundle_result_v2(
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
 ) -> Instruction {
     build_post_bundle_result_v2_instruction(
+        target_program_id,
         authority,
         bundle_escrow,
         Some(bundle_verifier_page),
@@ -519,12 +527,14 @@ pub fn post_bundle_result_v2(
 }
 
 pub fn post_bundle_result_v2_legacy(
+    target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
     result_hash: [u8; 32],
     posted_output_tokens: u64,
 ) -> Instruction {
     build_post_bundle_result_v2_instruction(
+        target_program_id,
         authority,
         bundle_escrow,
         None,
@@ -536,6 +546,7 @@ pub fn post_bundle_result_v2_legacy(
 }
 
 pub fn finalize_bundle_verification_v2(
+    target_program_id: Pubkey,
     coordinator: Pubkey,
     bundle_escrow: Pubkey,
     winner_node: Pubkey,
@@ -550,7 +561,7 @@ pub fn finalize_bundle_verification_v2(
         .iter()
         .map(|page| AccountMeta::new(*page, false))
         .collect();
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = FinalizeBundleVerificationV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -565,7 +576,7 @@ pub fn finalize_bundle_verification_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: FinalizeBundleVerificationV2Args {
             verification_hash,
             accepted_output_tokens,
@@ -579,11 +590,12 @@ pub fn finalize_bundle_verification_v2(
 }
 
 pub fn claim_winner_lstake_v2(
+    target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     winner_vote_account: Pubkey,
     vote_authority: Pubkey,
 ) -> Instruction {
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = ClaimWinnerLstakeV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         winner_vote_account: &AccountMeta::new(winner_vote_account, false),
@@ -596,13 +608,14 @@ pub fn claim_winner_lstake_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: ClaimWinnerLstakeV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
 
 pub fn claim_verifier_lstake_v2(
+    target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     verifier_vote_account: Pubkey,
     vote_authority: Pubkey,
@@ -612,7 +625,7 @@ pub fn claim_verifier_lstake_v2(
         .iter()
         .map(|page| AccountMeta::new(*page, false))
         .collect();
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = ClaimVerifierLstakeV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         verifier_vote_account: &AccountMeta::new(verifier_vote_account, false),
@@ -626,17 +639,18 @@ pub fn claim_verifier_lstake_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: ClaimVerifierLstakeV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
 
 pub fn expire_bundle_escrow_v2(
+    target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     requester_refund_recipient: Pubkey,
 ) -> Instruction {
-    let config_policy = find_config_policy_v2();
+    let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = ExpireBundleEscrowV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
@@ -644,7 +658,7 @@ pub fn expire_bundle_escrow_v2(
     };
 
     Instruction {
-        program_id,
+        program_id: target_program_id,
         data: ExpireBundleEscrowV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
