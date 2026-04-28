@@ -598,6 +598,7 @@ fn v2_instruction_builders_accept_explicit_program_id() {
         refund_recipient,
         [4; 32],
         29,
+        17,
         VerificationVerdictV2::Verified,
         0b011,
         &[verifier_page],
