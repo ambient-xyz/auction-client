@@ -542,6 +542,7 @@ pub fn finalize_bundle_verification_v2(
     requester_refund_recipient: Pubkey,
     verification_hash: [u8; 32],
     accepted_output_tokens: u64,
+    winner_payout_lamports: u64,
     verdict: VerificationVerdictV2,
     quorum_verifier_bitmap: u8,
     bundle_verifier_pages: &[Pubkey],
@@ -569,6 +570,7 @@ pub fn finalize_bundle_verification_v2(
         data: FinalizeBundleVerificationV2Args {
             verification_hash,
             accepted_output_tokens,
+            winner_payout_lamports,
             verdict,
             quorum_verifier_bitmap,
             _reserved: [0; 6],
