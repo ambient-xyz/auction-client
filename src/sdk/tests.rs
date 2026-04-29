@@ -373,6 +373,7 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
     );
 
     let args = OpenBundleEscrowV2Args::try_from(&instruction.data[1..]).unwrap();
+    assert_eq!(args.reward_tier, u64::from(RequestTier::Pro));
     assert_eq!(args.total_input_tokens, 100);
     assert_eq!(args.max_output_tokens, 200);
     assert_eq!(args.escrow_lamports, 300);

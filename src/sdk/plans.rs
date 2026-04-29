@@ -420,7 +420,7 @@ pub fn open_bundle_escrow_v2_plan(
             data: OpenBundleEscrowV2Args {
                 bundle_version,
                 _reserved0: [0; 4],
-                reward_tier,
+                reward_tier: u64::from(reward_tier),
                 bundle_hash,
                 coordinator: coordinator.to_bytes(),
                 requester_refund_recipient: requester_refund_recipient.to_bytes(),
