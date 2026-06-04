@@ -13,8 +13,9 @@ use std::num::NonZeroU64;
 #[cfg(feature = "global-config")]
 use super::init_config_plan;
 use super::{
-    find_auction, find_bundle_registry, find_child_bundle, find_config_policy_v2, init_bundle_plan,
-    open_bundle_escrow_v2_plan, place_bid_plan, request_job_plan, reveal_bid_plan, submit_job_plan,
+    find_auction, find_bundle_registry, find_bundle_verifier_page_v2, find_child_bundle,
+    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v2_plan, place_bid_plan,
+    request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
 fn build_post_bundle_result_v2_instruction(
@@ -443,6 +444,37 @@ pub fn set_config_policy_v2(
     Instruction {
         program_id: target_program_id,
         data: SetConfigPolicyV2Args { policy }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn init_bundle_verifier_page_v2(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+    bundle_verifier_page_lamports: u64,
+) -> Instruction {
+    let bundle_verifier_page =
+        find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index);
+    let account_metas = InitBundleVerifierPageV2Accounts {
+        payer: &AccountMeta::new(payer, true),
+        bundle_escrow: &AccountMeta::new_readonly(bundle_escrow, false),
+        bundle_verifier_page: &AccountMeta::new(bundle_verifier_page, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: InitBundleVerifierPageV2Args {
+            bundle_verifier_page_lamports,
+            page_index,
+            _reserved: [0; 6],
+        }
+        .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }

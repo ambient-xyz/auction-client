@@ -1,8 +1,9 @@
 use super::*;
 use ambient_auction_api::{
-    BUNDLE_ESCROW_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
-    ConfigPolicyV2, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
-    PostBundleResultV2Args, RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry,
+    CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2, InitBundleVerifierPageV2Args,
+    InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs, PostBundleResultV2Args,
+    RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
     instruction::Instruction,
@@ -68,6 +69,22 @@ fn find_bundle_escrow_for_program(
     .0
 }
 
+fn find_bundle_verifier_page_for_program(
+    program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            BUNDLE_VERIFIER_PAGE_V2_SEED,
+            bundle_escrow.as_ref(),
+            page_index.to_le_bytes().as_ref(),
+        ],
+        &program_id,
+    )
+    .0
+}
+
 #[test]
 fn flexible_key_inputs_resolve_to_same_pubkeys() {
     let bundle = Pubkey::new_unique();
@@ -88,6 +105,49 @@ fn flexible_key_inputs_resolve_to_same_pubkeys() {
         find_bundle_escrow_v2(crate::ID, payer, bundle_hash, 2),
         find_bundle_escrow_v2(crate::ID, &payer_bytes, bundle_hash, 2)
     );
+
+    let bundle_escrow = find_bundle_escrow_v2(crate::ID, payer, bundle_hash, 2);
+    let bundle_escrow_bytes = bundle_escrow.to_bytes();
+    assert_eq!(
+        find_bundle_verifier_page_v2(crate::ID, bundle_escrow, 3),
+        find_bundle_verifier_page_v2(crate::ID, &bundle_escrow_bytes, 3)
+    );
+}
+
+#[test]
+fn init_bundle_verifier_page_v2_uses_canonical_page_pda_and_encoded_args() {
+    let forced_program_id = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+    let page_index = 7;
+    let lamports = 12_345;
+    let expected_page =
+        find_bundle_verifier_page_for_program(forced_program_id, bundle_escrow, page_index);
+
+    let instruction = init_bundle_verifier_page_v2(
+        forced_program_id,
+        payer,
+        bundle_escrow,
+        page_index,
+        lamports,
+    );
+    let args = InitBundleVerifierPageV2Args::try_from(&instruction.data[1..]).unwrap();
+
+    assert_eq!(instruction.program_id, forced_program_id);
+    assert_eq!(instruction.accounts.len(), 4);
+    assert_eq!(instruction.accounts[0].pubkey, payer);
+    assert!(instruction.accounts[0].is_signer);
+    assert!(instruction.accounts[0].is_writable);
+    assert_eq!(instruction.accounts[1].pubkey, bundle_escrow);
+    assert!(!instruction.accounts[1].is_writable);
+    assert_eq!(instruction.accounts[2].pubkey, expected_page);
+    assert!(instruction.accounts[2].is_writable);
+    assert_eq!(
+        instruction.accounts[3].pubkey,
+        Pubkey::new_from_array(solana_system_interface::program::ID.to_bytes())
+    );
+    assert_eq!(args.bundle_verifier_page_lamports, lamports);
+    assert_eq!(args.page_index, page_index);
 }
 
 #[test]

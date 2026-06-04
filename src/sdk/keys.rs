@@ -1,8 +1,9 @@
 use crate::ID as program_id;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED, CONFIG_POLICY_V2_SEED,
-    CONFIG_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES, REQUEST_BUNDLE_SEED,
+    AUCTION_SEED, BID_SEED, BUNDLE_ESCROW_V2_SEED, BUNDLE_REGISTRY_SEED,
+    BUNDLE_VERIFIER_PAGE_V2_SEED, CONFIG_POLICY_V2_SEED, CONFIG_SEED, JOB_REQUEST_SEED,
+    PUBKEY_BYTES, REQUEST_BUNDLE_SEED,
 };
 use solana_sdk::pubkey::{MAX_SEED_LEN, Pubkey};
 
@@ -127,6 +128,23 @@ pub fn find_bundle_escrow_v2(
             payer.as_ref(),
             bundle_hash.as_ref(),
             bundle_version.to_le_bytes().as_ref(),
+        ],
+        &target_program_id,
+    )
+    .0
+}
+
+pub fn find_bundle_verifier_page_v2(
+    target_program_id: Pubkey,
+    bundle_escrow: impl ToClientPubkey,
+    page_index: u16,
+) -> Pubkey {
+    let bundle_escrow = bundle_escrow.to_client_pubkey();
+    Pubkey::find_program_address(
+        &[
+            BUNDLE_VERIFIER_PAGE_V2_SEED,
+            bundle_escrow.as_ref(),
+            page_index.to_le_bytes().as_ref(),
         ],
         &target_program_id,
     )
