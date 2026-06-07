@@ -1,9 +1,10 @@
 use super::*;
 use ambient_auction_api::{
-    BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry,
-    CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2, InitBundleVerifierPageV2Args,
-    InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs, PostBundleResultV2Args,
-    RequestTier, RevealBidArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    AuctionInstruction, BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
+    BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
+    ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args, InstructionAccounts,
+    OpenBundleEscrowV2Args, PlaceBidArgs, PostBundleResultV2Args, RequestTier, RequestTierConfigV2,
+    RevealBidArgs, SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
     instruction::Instruction,
@@ -615,10 +616,17 @@ fn v2_instruction_builders_accept_explicit_program_id() {
         expected_config_policy
     );
 
-    let set_config_policy =
-        set_config_policy_v2(forced_program_id, authority, ConfigPolicyV2::default());
+    let set_config_policy = set_config_policy_v2_flags(
+        forced_program_id,
+        authority,
+        ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+    );
     assert_eq!(set_config_policy.program_id, forced_program_id);
     assert_eq!(set_config_policy.accounts[1].pubkey, expected_config_policy);
+    assert_eq!(
+        set_config_policy.data[0],
+        AuctionInstruction::SetConfigPolicyV2 as u8
+    );
 
     let commit = commit_auction_settlement_v2(
         forced_program_id,
@@ -688,4 +696,42 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     let expire = expire_bundle_escrow_v2(forced_program_id, bundle_escrow, refund_recipient);
     assert_eq!(expire.program_id, forced_program_id);
     assert_eq!(expire.accounts[2].pubkey, expected_config_policy);
+}
+
+#[test]
+fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
+    let program_id = Pubkey::new_unique();
+    let authority = Pubkey::new_unique();
+    let replacement_authority = Pubkey::new_unique();
+    let expected_config_policy = find_config_policy_for_program(program_id);
+    let tier_config = RequestTierConfigV2::from_request_tier(RequestTier::Small);
+
+    let instructions = [
+        set_config_policy_v2_flags(
+            program_id,
+            authority,
+            ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+        ),
+        set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
+        set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
+        set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
+        set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
+        set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+    ];
+
+    for instruction in instructions {
+        assert_eq!(instruction.program_id, program_id);
+        assert_eq!(
+            instruction.data[0],
+            AuctionInstruction::SetConfigPolicyV2 as u8
+        );
+        assert_eq!(
+            instruction.data.len(),
+            1 + std::mem::size_of::<SetConfigPolicyV2Args>()
+        );
+        assert!(instruction.data.len() < 256);
+        assert_eq!(instruction.accounts[0].pubkey, authority);
+        assert!(instruction.accounts[0].is_signer);
+        assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
+    }
 }

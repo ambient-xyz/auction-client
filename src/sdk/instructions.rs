@@ -1,5 +1,5 @@
 use crate::ID as program_id;
-use ambient_auction_api::state::RequestTier;
+use ambient_auction_api::state::{ConfigPolicyV2Flags, RequestTier, RequestTierConfigV2};
 use ambient_auction_api::{PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -428,13 +428,41 @@ pub fn init_config_policy_v2(
     }
 }
 
-pub fn set_config_policy_v2(
+fn empty_set_config_policy_v2_args(patch_kind: ConfigPolicyV2PatchKind) -> SetConfigPolicyV2Args {
+    SetConfigPolicyV2Args {
+        patch_kind,
+        authority_kind: ConfigPolicyV2AuthorityKind::ADMIN,
+        authority_index: 0,
+        v2_verifiers_per_auction: 0,
+        v2_verifier_quorum: 0,
+        _reserved0: [0; 3],
+        tier: 0,
+        policy_flags: ConfigPolicyV2Flags::empty(),
+        max_auction_credits_per_update: 0,
+        authority: [0; 32].into(),
+        tier_config: RequestTierConfigV2 {
+            bid_reveal_duration: 0,
+            active_auction_duration: 0,
+            bundle_duration: 0,
+            requests_per_bundle: 0,
+            max_context_length_tokens: 0,
+            job_submission_duration_slots: 0,
+            bid_commitment_amount_multiplier: 0,
+            auction_credits_multiplier: 0,
+            settlement_window_slots: 0,
+            result_window_slots: 0,
+            verification_window_slots: 0,
+            claim_window_slots: 0,
+        },
+    }
+}
+
+fn set_config_policy_v2_with_args(
     target_program_id: Pubkey,
     authority: Pubkey,
-    mut policy: ambient_auction_api::ConfigPolicyV2,
+    args: SetConfigPolicyV2Args,
 ) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
-    policy.bump = 0;
 
     let account_metas = SetConfigPolicyV2Accounts {
         authority: &AccountMeta::new(authority, true),
@@ -443,9 +471,111 @@ pub fn set_config_policy_v2(
 
     Instruction {
         program_id: target_program_id,
-        data: SetConfigPolicyV2Args { policy }.to_bytes(),
+        data: args.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
+}
+
+pub fn set_config_policy_v2_flags(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    policy_flags: ConfigPolicyV2Flags,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            policy_flags,
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::FLAGS)
+        },
+    )
+}
+
+pub fn set_config_policy_v2_admin_authority(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    authority_index: u8,
+    admin_authority: Pubkey,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            authority_kind: ConfigPolicyV2AuthorityKind::ADMIN,
+            authority_index,
+            authority: admin_authority.to_bytes().into(),
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::AUTHORITY)
+        },
+    )
+}
+
+pub fn set_config_policy_v2_service_authority(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    authority_index: u8,
+    service_authority: Pubkey,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            authority_kind: ConfigPolicyV2AuthorityKind::SERVICE,
+            authority_index,
+            authority: service_authority.to_bytes().into(),
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::AUTHORITY)
+        },
+    )
+}
+
+pub fn set_config_policy_v2_verifier_settings(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    v2_verifiers_per_auction: u8,
+    v2_verifier_quorum: u8,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            v2_verifiers_per_auction,
+            v2_verifier_quorum,
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::VERIFIER_SETTINGS)
+        },
+    )
+}
+
+pub fn set_config_policy_v2_tier_config(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    tier: RequestTier,
+    tier_config: RequestTierConfigV2,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            tier: u64::from(tier),
+            tier_config,
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::TIER_CONFIG)
+        },
+    )
+}
+
+pub fn set_config_policy_v2_max_auction_credits_per_update(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    max_auction_credits_per_update: u64,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            max_auction_credits_per_update,
+            ..empty_set_config_policy_v2_args(
+                ConfigPolicyV2PatchKind::MAX_AUCTION_CREDITS_PER_UPDATE,
+            )
+        },
+    )
 }
 
 pub fn init_bundle_verifier_page_v2(
