@@ -1,5 +1,7 @@
 use crate::ID as program_id;
-use ambient_auction_api::state::{ConfigPolicyV2Flags, RequestTier, RequestTierConfigV2};
+use ambient_auction_api::state::{
+    ConfigPolicyV2, ConfigPolicyV2Flags, RequestTier, RequestTierConfigV2,
+};
 use ambient_auction_api::{PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -401,15 +403,16 @@ pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
 
 pub fn init_config_policy_v2(
     target_program_id: Pubkey,
-    authority: Pubkey,
+    payer: Pubkey,
     config_policy_lamports: u64,
-    mut policy: ambient_auction_api::ConfigPolicyV2,
+    initial_admin_authority: Pubkey,
+    service_authority: Pubkey,
+    policy: ConfigPolicyV2,
 ) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
-    policy.bump = 0;
 
     let account_metas = InitConfigPolicyV2Accounts {
-        authority: &AccountMeta::new(authority, true),
+        authority: &AccountMeta::new(payer, true),
         config_policy: &AccountMeta::new(config_policy, false),
         system_program: &AccountMeta::new_readonly(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
@@ -421,7 +424,15 @@ pub fn init_config_policy_v2(
         program_id: target_program_id,
         data: InitConfigPolicyV2Args {
             config_policy_lamports,
-            policy,
+            initial_admin_authority: initial_admin_authority.to_bytes().into(),
+            service_authority: service_authority.to_bytes().into(),
+            policy_flags: policy.policy_flags,
+            minimum_bundle_auction_pairs: policy.minimum_bundle_auction_pairs,
+            max_auction_credits_per_update: policy.max_auction_credits_per_update,
+            v2_verifiers_per_auction: policy.v2_verifiers_per_auction,
+            v2_verifier_quorum: policy.v2_verifier_quorum,
+            _reserved0: [0; 6],
+            tier_configs: policy.tier_configs,
         }
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),

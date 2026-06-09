@@ -2,9 +2,10 @@ use super::*;
 use ambient_auction_api::{
     AuctionInstruction, BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
     BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
-    ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args, InstructionAccounts,
-    OpenBundleEscrowV2Args, PlaceBidArgs, PostBundleResultV2Args, RequestTier, RequestTierConfigV2,
-    RevealBidArgs, SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
+    ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
+    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
+    PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs,
+    SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
     instruction::Instruction,
@@ -599,7 +600,9 @@ fn open_bundle_escrow_v2_plan_supports_explicit_program_id() {
 fn v2_instruction_builders_accept_explicit_program_id() {
     let forced_program_id = Pubkey::new_unique();
     let expected_config_policy = find_config_policy_for_program(forced_program_id);
+    let payer = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
+    let service_authority = Pubkey::new_unique();
     let bundle_escrow = Pubkey::new_unique();
     let winner_vote_account = Pubkey::new_unique();
     let winner_node = Pubkey::new_unique();
@@ -608,12 +611,27 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     let verifier_vote_account = Pubkey::new_unique();
     let vote_authority = Pubkey::new_unique();
 
-    let init_config_policy =
-        init_config_policy_v2(forced_program_id, authority, 11, ConfigPolicyV2::default());
+    let init_config_policy = init_config_policy_v2(
+        forced_program_id,
+        payer,
+        11,
+        authority,
+        service_authority,
+        ConfigPolicyV2::default(),
+    );
     assert_eq!(init_config_policy.program_id, forced_program_id);
+    assert_eq!(init_config_policy.accounts[0].pubkey, payer);
     assert_eq!(
         init_config_policy.accounts[1].pubkey,
         expected_config_policy
+    );
+    assert_eq!(
+        init_config_policy.data[0],
+        AuctionInstruction::InitConfigPolicyV2 as u8
+    );
+    assert_eq!(
+        init_config_policy.data.len(),
+        1 + std::mem::size_of::<InitConfigPolicyV2Args>()
     );
 
     let set_config_policy = set_config_policy_v2_flags(
