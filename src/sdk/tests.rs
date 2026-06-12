@@ -5,11 +5,12 @@ use ambient_auction_api::{
     ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
     InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
     PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs,
-    SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
+    SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
 };
 use solana_sdk::{
-    instruction::Instruction,
+    instruction::{Instruction, InstructionError},
     pubkey::{MAX_SEED_LEN, Pubkey},
+    transaction::TransactionError,
 };
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -85,6 +86,73 @@ fn find_bundle_verifier_page_for_program(
         &program_id,
     )
     .0
+}
+
+#[test]
+fn auction_program_error_decodes_known_custom_error() {
+    let decoded = decode_instruction_error(InstructionError::Custom(
+        AuctionError::InvalidOpenBundleEscrowV2Args.code(),
+    ));
+
+    assert_eq!(
+        decoded,
+        AuctionProgramError::Known(AuctionError::InvalidOpenBundleEscrowV2Args)
+    );
+    assert_eq!(
+        decoded.to_string(),
+        "InvalidOpenBundleEscrowV2Args: Open bundle escrow v2 arguments are invalid"
+    );
+    assert_eq!(
+        decoded.auction_error(),
+        Some(AuctionError::InvalidOpenBundleEscrowV2Args)
+    );
+}
+
+#[test]
+fn auction_program_error_preserves_unknown_custom_error() {
+    let decoded = decode_instruction_error(InstructionError::Custom(999));
+
+    assert_eq!(decoded, AuctionProgramError::UnknownCustom(999));
+    assert_eq!(decoded.to_string(), "Unknown auction custom error code 999");
+    assert_eq!(decoded.auction_error(), None);
+}
+
+#[test]
+fn auction_program_error_preserves_runtime_error() {
+    let decoded = decode_instruction_error(InstructionError::InvalidSeeds);
+
+    assert_eq!(
+        decoded,
+        AuctionProgramError::Runtime(InstructionError::InvalidSeeds)
+    );
+    assert_eq!(decoded.auction_error(), None);
+}
+
+#[test]
+fn auction_transaction_error_extracts_instruction_index() {
+    let decoded = decode_transaction_error(TransactionError::InstructionError(
+        3,
+        InstructionError::Custom(AuctionError::InvalidVerifierRewardV2.code()),
+    ))
+    .unwrap();
+
+    assert_eq!(decoded.instruction_index, 3);
+    assert_eq!(
+        decoded.error,
+        AuctionProgramError::Known(AuctionError::InvalidVerifierRewardV2)
+    );
+    assert_eq!(
+        decoded.to_string(),
+        "auction instruction 3 failed: InvalidVerifierRewardV2: Verifier reward data is invalid"
+    );
+}
+
+#[test]
+fn auction_transaction_error_ignores_non_instruction_errors() {
+    assert_eq!(
+        decode_transaction_error(TransactionError::AccountNotFound),
+        None
+    );
 }
 
 #[test]
