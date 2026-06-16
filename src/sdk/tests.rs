@@ -148,11 +148,127 @@ fn auction_transaction_error_extracts_instruction_index() {
 }
 
 #[test]
-fn auction_transaction_error_ignores_non_instruction_errors() {
+fn transaction_error_decoders_preserve_non_instruction_errors() {
     assert_eq!(
         decode_transaction_error(TransactionError::AccountNotFound),
         None
     );
+
+    let decoded = decode_transaction_error_with_instructions(
+        TransactionError::AccountNotFound,
+        &[],
+        crate::ID,
+    );
+
+    assert_eq!(decoded.instruction_index(), None);
+    assert_eq!(decoded.auction_error(), None);
+    assert_eq!(
+        decoded.transaction_error(),
+        Some(&TransactionError::AccountNotFound)
+    );
+}
+
+#[test]
+fn context_aware_error_decodes_matching_auction_program_custom_error() {
+    let auction_error = AuctionError::InvalidWinnerNode;
+    let instructions = vec![Instruction {
+        program_id: crate::ID,
+        accounts: Vec::new(),
+        data: Vec::new(),
+    }];
+    let decoded = decode_transaction_error_with_instructions(
+        TransactionError::InstructionError(0, InstructionError::Custom(auction_error.code())),
+        &instructions,
+        crate::ID,
+    );
+
+    assert_eq!(decoded.instruction_index(), Some(0));
+    assert_eq!(decoded.program_id(), Some(crate::ID));
+    assert_eq!(decoded.custom_code(), Some(auction_error.code()));
+    assert_eq!(decoded.auction_error(), Some(auction_error));
+    assert_eq!(
+        decoded.auction_program_error(),
+        Some(&AuctionProgramError::Known(auction_error))
+    );
+    assert_eq!(
+        decoded.to_string(),
+        format!(
+            "auction instruction 0 ({}) failed: {}: {}",
+            crate::ID,
+            auction_error.name(),
+            auction_error.message()
+        )
+    );
+}
+
+#[test]
+fn context_aware_error_does_not_decode_non_auction_program_custom_error() {
+    let other_program = Pubkey::new_unique();
+    let custom_code = AuctionError::InvalidWinnerNode.code();
+    let instructions = vec![Instruction {
+        program_id: other_program,
+        accounts: Vec::new(),
+        data: Vec::new(),
+    }];
+    let decoded = decode_transaction_error_with_instructions(
+        TransactionError::InstructionError(0, InstructionError::Custom(custom_code)),
+        &instructions,
+        crate::ID,
+    );
+
+    assert_eq!(decoded.instruction_index(), Some(0));
+    assert_eq!(decoded.program_id(), Some(other_program));
+    assert_eq!(decoded.custom_code(), Some(custom_code));
+    assert_eq!(decoded.auction_error(), None);
+    assert_eq!(decoded.auction_program_error(), None);
+    assert!(decoded.to_string().contains("instruction 0"));
+    assert!(decoded.to_string().contains(&other_program.to_string()));
+}
+
+#[test]
+fn context_aware_error_preserves_unknown_auction_custom_error() {
+    let instructions = vec![Instruction {
+        program_id: crate::ID,
+        accounts: Vec::new(),
+        data: Vec::new(),
+    }];
+    let decoded = decode_transaction_error_with_instructions(
+        TransactionError::InstructionError(0, InstructionError::Custom(999)),
+        &instructions,
+        crate::ID,
+    );
+
+    assert_eq!(decoded.custom_code(), Some(999));
+    assert_eq!(decoded.auction_error(), None);
+    assert_eq!(
+        decoded.auction_program_error(),
+        Some(&AuctionProgramError::UnknownCustom(999))
+    );
+    assert!(decoded
+        .to_string()
+        .contains("Unknown auction custom error code 999"));
+}
+
+#[test]
+fn context_aware_error_preserves_out_of_range_instruction_index() {
+    let custom_code = AuctionError::InvalidVerifierRewardV2.code();
+    let instructions = vec![Instruction {
+        program_id: crate::ID,
+        accounts: Vec::new(),
+        data: Vec::new(),
+    }];
+    let decoded = decode_transaction_error_with_instructions(
+        TransactionError::InstructionError(3, InstructionError::Custom(custom_code)),
+        &instructions,
+        crate::ID,
+    );
+
+    assert_eq!(decoded.instruction_index(), Some(3));
+    assert_eq!(decoded.program_id(), None);
+    assert_eq!(decoded.custom_code(), Some(custom_code));
+    assert_eq!(decoded.auction_error(), None);
+    assert_eq!(decoded.auction_program_error(), None);
+    assert!(decoded.to_string().contains("program id unavailable"));
 }
 
 #[test]
