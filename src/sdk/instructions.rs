@@ -777,7 +777,7 @@ pub fn finalize_bundle_verification_v2(
             solana_sdk::sysvar::instructions::ID,
             false,
         ),
-        bundle_verifier_pages: &page_accounts,
+        remaining_accounts: &page_accounts,
         config_policy: &AccountMeta::new(config_policy, false),
     };
 
