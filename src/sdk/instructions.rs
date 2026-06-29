@@ -927,12 +927,11 @@ pub fn expire_bundle_escrow_v2(
     requester_refund_recipient: Pubkey,
 ) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
-    let remaining_accounts: [AccountMeta; 0] = [];
     let account_metas = ExpireBundleEscrowV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
         config_policy: &AccountMeta::new(config_policy, false),
-        remaining_accounts: &remaining_accounts,
+        remaining_accounts: &[],
     };
 
     Instruction {
