@@ -17,9 +17,10 @@ use std::num::NonZeroU64;
 #[cfg(feature = "global-config")]
 use super::init_config_plan;
 use super::{
-    find_auction, find_bundle_registry, find_bundle_verification_dispute_v2,
-    find_bundle_verifier_page_v2, find_child_bundle, find_config_policy_v2, init_bundle_plan,
-    open_bundle_escrow_v2_plan, place_bid_plan, request_job_plan, reveal_bid_plan, submit_job_plan,
+    find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
+    find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
+    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v2_plan, place_bid_plan,
+    request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
 fn build_post_bundle_result_v2_instruction(
@@ -652,6 +653,25 @@ pub fn init_bundle_verifier_page_v2(
     }
 }
 
+pub fn init_bundle_dispute_verifier_page_v2(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+    bundle_verifier_page_lamports: u64,
+) -> Instruction {
+    let mut instruction = init_bundle_verifier_page_v2(
+        target_program_id,
+        payer,
+        bundle_escrow,
+        page_index,
+        bundle_verifier_page_lamports,
+    );
+    instruction.accounts[2].pubkey =
+        find_bundle_dispute_verifier_page_v2(target_program_id, bundle_escrow, page_index);
+    instruction
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn open_bundle_escrow_v2(
     target_program_id: Pubkey,
@@ -809,15 +829,18 @@ pub fn finalize_disputed_bundle_verification_v2(
     winner_payout_lamports: u64,
     verdict: VerificationVerdictV2,
     quorum_verifier_bitmap: u8,
-    bundle_verifier_pages: &[Pubkey],
+    bundle_verifier_page_pairs: &[(Pubkey, Pubkey)],
 ) -> Instruction {
     let bundle_verification_dispute =
         find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
-    let mut trailing_accounts = Vec::with_capacity(2 + bundle_verifier_pages.len());
+    let mut trailing_accounts = Vec::with_capacity(2 + bundle_verifier_page_pairs.len() * 2);
     trailing_accounts.push(bundle_verification_dispute);
     trailing_accounts.push(bond_refund_recipient);
-    trailing_accounts.extend_from_slice(bundle_verifier_pages);
-    finalize_bundle_verification_v2(
+    for (staging_page, canonical_page) in bundle_verifier_page_pairs {
+        trailing_accounts.push(*staging_page);
+        trailing_accounts.push(*canonical_page);
+    }
+    let mut instruction = finalize_bundle_verification_v2(
         target_program_id,
         coordinator,
         bundle_escrow,
@@ -829,7 +852,15 @@ pub fn finalize_disputed_bundle_verification_v2(
         verdict,
         quorum_verifier_bitmap,
         &trailing_accounts,
-    )
+    );
+    let first_staging_account = instruction.accounts.len() - trailing_accounts.len() + 2;
+    for staging_account in instruction.accounts[first_staging_account..]
+        .iter_mut()
+        .step_by(2)
+    {
+        staging_account.is_writable = false;
+    }
+    instruction
 }
 
 pub fn dispute_bundle_verification_v2(
