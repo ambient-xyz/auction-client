@@ -397,6 +397,34 @@ fn init_bundle_dispute_verifier_page_v2_uses_staging_page_pda() {
 }
 
 #[test]
+fn verifier_selection_builders_use_initial_and_replacement_accounts() {
+    let program_id = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+
+    let initial = select_initial_bundle_verifiers_v2(program_id, bundle_escrow);
+    assert_eq!(initial.program_id, program_id);
+    assert_eq!(
+        initial.data,
+        vec![AuctionInstruction::SelectBundleVerifiersV2 as u8]
+    );
+    assert_eq!(initial.accounts.len(), 1);
+    assert_eq!(initial.accounts[0].pubkey, bundle_escrow);
+    assert!(initial.accounts[0].is_writable);
+    assert!(!initial.accounts[0].is_signer);
+
+    let replacement = select_replacement_bundle_verifiers_v2(program_id, bundle_escrow);
+    assert_eq!(replacement.data, initial.data);
+    assert_eq!(replacement.accounts.len(), 2);
+    assert_eq!(replacement.accounts[0], initial.accounts[0]);
+    assert_eq!(
+        replacement.accounts[1].pubkey,
+        find_bundle_verification_dispute_v2(program_id, bundle_escrow)
+    );
+    assert!(replacement.accounts[1].is_writable);
+    assert!(!replacement.accounts[1].is_signer);
+}
+
+#[test]
 fn disputed_finalize_emits_staging_canonical_pairs_with_exact_access() {
     let program_id = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();

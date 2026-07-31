@@ -896,6 +896,46 @@ pub fn dispute_bundle_verification_v2(
     }
 }
 
+fn select_bundle_verifiers_v2(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verification_dispute: Option<Pubkey>,
+) -> Instruction {
+    let bundle_verification_dispute =
+        bundle_verification_dispute.map(|key| AccountMeta::new(key, false));
+    let account_metas = SelectBundleVerifiersV2Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        bundle_verification_dispute: bundle_verification_dispute.as_ref(),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: SelectBundleVerifiersV2Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn select_initial_bundle_verifiers_v2(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+) -> Instruction {
+    select_bundle_verifiers_v2(target_program_id, bundle_escrow, None)
+}
+
+pub fn select_replacement_bundle_verifiers_v2(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+) -> Instruction {
+    select_bundle_verifiers_v2(
+        target_program_id,
+        bundle_escrow,
+        Some(find_bundle_verification_dispute_v2(
+            target_program_id,
+            bundle_escrow,
+        )),
+    )
+}
+
 pub fn claim_winner_lstake_v2(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
