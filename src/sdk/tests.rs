@@ -2,13 +2,13 @@ use super::*;
 use ambient_auction_api::{
     AuctionInstruction, BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
     BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
-    ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
+    ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind, InitBundleVerifierPageV2Args,
     InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
-    PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs,
-    SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
+    PostBundleResultV2Args, PostSmallBundleResultV2Args, RequestTier, RequestTierConfigV2,
+    RevealBidArgs, SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
-    instruction::Instruction,
+    instruction::{AccountMeta, Instruction},
     pubkey::{MAX_SEED_LEN, Pubkey},
 };
 use std::net::{IpAddr, Ipv4Addr};
@@ -498,6 +498,23 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(args.page_index, 3);
     assert_eq!(args.page_entry_count, 1);
     assert_eq!(args.page_entries[0], entry);
+
+    let small = post_small_bundle_result_v2(
+        crate::ID,
+        authority,
+        bundle_escrow,
+        bundle_verifier_page,
+        [8; 32],
+        55,
+        3,
+        &[entry],
+        &[123],
+    );
+    assert_eq!(std::mem::size_of::<PostSmallBundleResultV2Args>(), 864);
+    assert_eq!(small.data.len(), 865);
+    assert_eq!(small.data[0], 24);
+    assert_eq!(&small.data[1..817], &instruction.data[1..]);
+    assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
 }
 
 #[test]
@@ -692,6 +709,25 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     assert_eq!(finalize.program_id, forced_program_id);
     assert_eq!(finalize.accounts[5].pubkey, expected_config_policy);
 
+    let remaining = [
+        AccountMeta::new_readonly(Pubkey::new_unique(), false),
+        AccountMeta::new(Pubkey::new_unique(), false),
+    ];
+    let finalize_with_remaining = finalize_bundle_verification_v2_with_remaining_accounts(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_node,
+        refund_recipient,
+        [4; 32],
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b011,
+        &remaining,
+    );
+    assert_eq!(&finalize_with_remaining.accounts[6..], &remaining);
+
     let claim_winner = claim_winner_lstake_v2(
         forced_program_id,
         bundle_escrow,
@@ -723,6 +759,12 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
     let replacement_authority = Pubkey::new_unique();
     let expected_config_policy = find_config_policy_for_program(program_id);
     let tier_config = RequestTierConfigV2::from_request_tier(RequestTier::Small);
+    let small_settings = set_config_policy_v2_small_credit_settings(
+        program_id,
+        authority,
+        true,
+        replacement_authority,
+    );
 
     let instructions = [
         set_config_policy_v2_flags(
@@ -735,6 +777,7 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
         set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
         set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
         set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+        small_settings.clone(),
     ];
 
     for instruction in instructions {
@@ -752,4 +795,16 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
+
+    let args = SetConfigPolicyV2Args::try_from(&small_settings.data[1..]).unwrap();
+    assert_eq!(std::mem::size_of::<SetConfigPolicyV2Args>(), 160);
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
+    );
+    assert_eq!(args.small_credit_enabled, 1);
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
 }
