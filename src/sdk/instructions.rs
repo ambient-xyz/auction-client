@@ -722,7 +722,7 @@ pub fn post_bundle_result_v2(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn post_small_bundle_result_v2(
+pub fn post_bundle_result_v3(
     target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
@@ -754,7 +754,7 @@ pub fn post_small_bundle_result_v2(
         posted_output_tokens,
         page_index,
         page_entries,
-        |post| PostSmallBundleResultV2Args {
+        |post| PostBundleResultV3Args {
             post,
             input_tokens: padded_input_tokens,
         },

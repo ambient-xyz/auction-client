@@ -4,7 +4,7 @@ use ambient_auction_api::{
     BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
     ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind, InitBundleVerifierPageV2Args,
     InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
-    PostBundleResultV2Args, PostSmallBundleResultV2Args, RequestTier, RequestTierConfigV2,
+    PostBundleResultV2Args, PostBundleResultV3Args, RequestTier, RequestTierConfigV2,
     RevealBidArgs, SetConfigPolicyV2Args, SubmitJobOutputArgs, VerificationVerdictV2,
 };
 use solana_sdk::{
@@ -499,7 +499,7 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(args.page_entry_count, 1);
     assert_eq!(args.page_entries[0], entry);
 
-    let small = post_small_bundle_result_v2(
+    let small = post_bundle_result_v3(
         crate::ID,
         authority,
         bundle_escrow,
@@ -510,9 +510,9 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
         &[entry],
         &[123],
     );
-    assert_eq!(std::mem::size_of::<PostSmallBundleResultV2Args>(), 864);
+    assert_eq!(std::mem::size_of::<PostBundleResultV3Args>(), 864);
     assert_eq!(small.data.len(), 865);
-    assert_eq!(small.data[0], 24);
+    assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
     assert_eq!(&small.data[1..817], &instruction.data[1..]);
     assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
 }
