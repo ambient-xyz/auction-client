@@ -20,7 +20,8 @@ use super::{
     request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
-fn build_post_bundle_result_v2_instruction(
+#[allow(clippy::too_many_arguments)]
+fn build_post_bundle_result_v2_instruction<D: InstructionBytes>(
     target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
@@ -29,6 +30,7 @@ fn build_post_bundle_result_v2_instruction(
     posted_output_tokens: u64,
     page_index: u16,
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
+    wrap_data: impl FnOnce(PostBundleResultV2Args) -> D,
 ) -> Instruction {
     assert!(
         page_entries.len() <= ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES,
@@ -55,14 +57,14 @@ fn build_post_bundle_result_v2_instruction(
 
     Instruction {
         program_id: target_program_id,
-        data: PostBundleResultV2Args {
+        data: wrap_data(PostBundleResultV2Args {
             result_hash,
             posted_output_tokens,
             page_index,
             page_entry_count: page_entries.len() as u16,
             _reserved: [0; 4],
             page_entries: padded_page_entries,
-        }
+        })
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
@@ -446,7 +448,8 @@ fn empty_set_config_policy_v2_args(patch_kind: ConfigPolicyV2PatchKind) -> SetCo
         authority_index: 0,
         v2_verifiers_per_auction: 0,
         v2_verifier_quorum: 0,
-        _reserved0: [0; 3],
+        small_credit_enabled: 0,
+        _reserved0: [0; 2],
         tier: 0,
         policy_flags: ConfigPolicyV2Flags::empty(),
         max_auction_credits_per_update: 0,
@@ -589,6 +592,23 @@ pub fn set_config_policy_v2_max_auction_credits_per_update(
     )
 }
 
+pub fn set_config_policy_v2_small_credit_settings(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    enabled: bool,
+    mint: Pubkey,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            small_credit_enabled: u8::from(enabled),
+            authority: mint.to_bytes().into(),
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS)
+        },
+    )
+}
+
 pub fn init_bundle_verifier_page_v2(
     target_program_id: Pubkey,
     payer: Pubkey,
@@ -677,6 +697,7 @@ pub fn commit_auction_settlement_v2(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn post_bundle_result_v2(
     target_program_id: Pubkey,
     authority: Pubkey,
@@ -696,6 +717,47 @@ pub fn post_bundle_result_v2(
         posted_output_tokens,
         page_index,
         page_entries,
+        std::convert::identity,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn post_bundle_result_v3(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verifier_page: Pubkey,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+    page_index: u16,
+    page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
+    input_tokens: &[u64],
+) -> Instruction {
+    assert_eq!(
+        page_entries.len(),
+        input_tokens.len(),
+        "small page entries and input-token values must match"
+    );
+    assert!(
+        input_tokens.len() <= ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES,
+        "input-token values exceed BundleVerifierPageV2 capacity"
+    );
+    let mut padded_input_tokens = [0; ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES];
+    padded_input_tokens[..input_tokens.len()].copy_from_slice(input_tokens);
+
+    build_post_bundle_result_v2_instruction(
+        target_program_id,
+        authority,
+        bundle_escrow,
+        Some(bundle_verifier_page),
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entries,
+        |post| PostBundleResultV3Args {
+            post,
+            input_tokens: padded_input_tokens,
+        },
     )
 }
 
@@ -715,9 +777,11 @@ pub fn post_bundle_result_v2_legacy(
         posted_output_tokens,
         0,
         &[],
+        std::convert::identity,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn finalize_bundle_verification_v2(
     target_program_id: Pubkey,
     coordinator: Pubkey,
@@ -735,6 +799,36 @@ pub fn finalize_bundle_verification_v2(
         .iter()
         .map(|page| AccountMeta::new(*page, false))
         .collect();
+
+    finalize_bundle_verification_v2_with_remaining_accounts(
+        target_program_id,
+        coordinator,
+        bundle_escrow,
+        winner_node,
+        requester_refund_recipient,
+        verification_hash,
+        accepted_output_tokens,
+        winner_payout_lamports,
+        verdict,
+        quorum_verifier_bitmap,
+        &page_accounts,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_bundle_verification_v2_with_remaining_accounts(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    winner_node: Pubkey,
+    requester_refund_recipient: Pubkey,
+    verification_hash: [u8; 32],
+    accepted_output_tokens: u64,
+    winner_payout_lamports: u64,
+    verdict: VerificationVerdictV2,
+    quorum_verifier_bitmap: u8,
+    remaining_accounts: &[AccountMeta],
+) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = FinalizeBundleVerificationV2Accounts {
         coordinator: &AccountMeta::new(coordinator, true),
@@ -745,7 +839,7 @@ pub fn finalize_bundle_verification_v2(
             solana_sdk::sysvar::instructions::ID,
             false,
         ),
-        bundle_verifier_pages: &page_accounts,
+        bundle_verifier_pages: remaining_accounts,
         config_policy: &AccountMeta::new(config_policy, false),
     };
 
