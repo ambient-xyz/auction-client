@@ -609,6 +609,50 @@ pub fn set_config_policy_v2_small_credit_settings(
     )
 }
 
+pub fn set_config_policy_v2_small_credit_slash_authority(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    slash_authority: Pubkey,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            authority: slash_authority.to_bytes().into(),
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY)
+        },
+    )
+}
+
+pub fn slash_small_credits(
+    target_program_id: Pubkey,
+    slash_authority: Pubkey,
+    mint: Pubkey,
+    token_account: Pubkey,
+    token_program: Pubkey,
+    amount: u64,
+    expected_token_account_balance: u64,
+) -> Instruction {
+    let config_policy = find_config_policy_v2(target_program_id);
+    let account_metas = SlashSmallCreditsAccounts {
+        slash_authority: &AccountMeta::new_readonly(slash_authority, true),
+        config_policy: &AccountMeta::new_readonly(config_policy, false),
+        mint: &AccountMeta::new(mint, false),
+        token_account: &AccountMeta::new(token_account, false),
+        token_program: &AccountMeta::new_readonly(token_program, false),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: SlashSmallCreditsArgs {
+            amount,
+            expected_token_account_balance,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect(),
+    }
+}
+
 pub fn init_bundle_verifier_page_v2(
     target_program_id: Pubkey,
     payer: Pubkey,
