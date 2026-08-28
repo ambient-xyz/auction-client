@@ -862,7 +862,7 @@ fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
             .collect::<Vec<_>>(),
         vec![
             (true, false),
-            (false, false),
+            (false, true),
             (false, true),
             (false, true),
             (false, false)
@@ -880,7 +880,7 @@ fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
         SlashSmallCreditsArgs::try_from(&instruction.data[1..]).unwrap(),
         SlashSmallCreditsArgs {
             amount: 2,
-            expected_token_account_balance: 5,
+            sequence: 5,
         }
     );
 }

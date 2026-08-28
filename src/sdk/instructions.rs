@@ -631,12 +631,12 @@ pub fn slash_small_credits(
     token_account: Pubkey,
     token_program: Pubkey,
     amount: u64,
-    expected_token_account_balance: u64,
+    sequence: u64,
 ) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
     let account_metas = SlashSmallCreditsAccounts {
         slash_authority: &AccountMeta::new_readonly(slash_authority, true),
-        config_policy: &AccountMeta::new_readonly(config_policy, false),
+        config_policy: &AccountMeta::new(config_policy, false),
         mint: &AccountMeta::new(mint, false),
         token_account: &AccountMeta::new(token_account, false),
         token_program: &AccountMeta::new_readonly(token_program, false),
@@ -644,11 +644,7 @@ pub fn slash_small_credits(
 
     Instruction {
         program_id: target_program_id,
-        data: SlashSmallCreditsArgs {
-            amount,
-            expected_token_account_balance,
-        }
-        .to_bytes(),
+        data: SlashSmallCreditsArgs { amount, sequence }.to_bytes(),
         accounts: account_metas.iter_owned().collect(),
     }
 }
