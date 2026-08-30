@@ -1,7 +1,16 @@
-cargo-features = ["edition2024"]
+# `cargo-features` is accepted only by nightly cargo and turns the whole manifest into a hard error on
+# stable ("the `cargo-features` key ... is only allowed on the nightly channel"). The 2024 edition has
+# been stable since Rust 1.85, so the gate is obsolete and only blocks stable builds and stable CI.
 [package]
 name = "ambient-auction-client"
+authors = ["Engineering <engineering@ambientcrypto.ai>"]
 version = "0.1.0"
+# Taken from this repository's own `git remote -v`.
+repository = "https://github.com/ambient-xyz/auction-client"
+# Without a license field, `cargo package`/`cargo publish` refuse to build the crate and license-audit
+# tooling classifies it as unlicensed. Matches the value used by every sibling crate that declares one.
+license = "Proprietary"
+homepage = "https://ambient.xyz"
 edition = "2024"
 
 [dependencies]
