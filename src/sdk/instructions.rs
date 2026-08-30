@@ -256,8 +256,10 @@ pub fn cancel_bundle(
         data: CancelBundleArgs {
             parent_bundle_key: parent_bundle_key.to_bytes().into(),
             bundle_bump: bundle_bump.into(),
-            context_length_tier,
-            expiry_duration_tier,
+            // The instruction args store the tier as a validated raw `u64` wrapper. The emitted
+            // bytes are unchanged; only the Rust type differs.
+            context_length_tier: context_length_tier.into(),
+            expiry_duration_tier: expiry_duration_tier.into(),
             child_bundle_bump: child_bundle_bump as u64,
             bundle_lamports,
         }
@@ -277,8 +279,18 @@ pub fn close_bid(
 ) -> Instruction {
     let account_metas = CloseBidAccounts {
         bid_authority: &AccountMeta::new(bid_authority, true),
-        bid: &AccountMeta::new_readonly(bid_key, false),
-        auction_payer: &AccountMeta::new(auction_payer, true),
+        // Closing an account requires write access: the runtime rejects any lamport transfer out of a
+        // read-only account and any attempt to zero its data. Marking the bid read-only made this
+        // instruction impossible to execute successfully, since the one account it exists to close was
+        // the one account it could not touch.
+        bid: &AccountMeta::new(bid_key, false),
+        // The auction payer receives the reclaimed rent, so it must be writable, but it is *not* a
+        // signer: the on-chain validation in `auction-interface/src/instructions/close_bid.rs` binds it
+        // as `auction_payer: _` and requires no signature from it. Demanding one here made the
+        // instruction unbuildable in the normal case, where the closer (the bid authority) is a
+        // different party than the account that funded the auction and therefore cannot sign for it.
+        // `close_request` already passes the same account as `AccountMeta::new(auction_payer, false)`.
+        auction_payer: &AccountMeta::new(auction_payer, false),
         auction: &AccountMeta::new(auction_key, false),
         bundle: &AccountMeta::new_readonly(bundle_key, false),
         vote_account: &AccountMeta::new(vote_account, false),
