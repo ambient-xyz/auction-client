@@ -6,6 +6,7 @@ use ambient_auction_api::{
     BundleVerificationDisputeV2Kind, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
 };
 use solana_sdk::{
+    incinerator,
     instruction::{AccountMeta, Instruction},
     pubkey::{MAX_SEED_LEN, Pubkey},
 };
@@ -833,9 +834,10 @@ pub fn finalize_disputed_bundle_verification_v2(
 ) -> Instruction {
     let bundle_verification_dispute =
         find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
-    let mut trailing_accounts = Vec::with_capacity(2 + bundle_verifier_page_pairs.len() * 2);
+    let mut trailing_accounts = Vec::with_capacity(3 + bundle_verifier_page_pairs.len() * 2);
     trailing_accounts.push(bundle_verification_dispute);
     trailing_accounts.push(bond_refund_recipient);
+    trailing_accounts.push(incinerator::ID);
     for (staging_page, canonical_page) in bundle_verifier_page_pairs {
         trailing_accounts.push(*staging_page);
         trailing_accounts.push(*canonical_page);
@@ -853,7 +855,7 @@ pub fn finalize_disputed_bundle_verification_v2(
         quorum_verifier_bitmap,
         &trailing_accounts,
     );
-    let first_staging_account = instruction.accounts.len() - trailing_accounts.len() + 2;
+    let first_staging_account = instruction.accounts.len() - trailing_accounts.len() + 3;
     for staging_account in instruction.accounts[first_staging_account..]
         .iter_mut()
         .step_by(2)
