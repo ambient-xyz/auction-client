@@ -479,6 +479,7 @@ fn disputed_finalize_emits_staging_canonical_pairs_with_exact_access() {
             find_config_policy_for_program(program_id),
             find_bundle_verification_dispute_v2(program_id, bundle_escrow),
             bond_refund_recipient,
+            solana_sdk::incinerator::ID,
             staging0,
             canonical0,
             staging1,
@@ -492,7 +493,7 @@ fn disputed_finalize_emits_staging_canonical_pairs_with_exact_access() {
             .map(|meta| meta.is_writable)
             .collect::<Vec<_>>(),
         vec![
-            true, true, true, true, false, true, true, true, false, true, false, true
+            true, true, true, true, false, true, true, true, true, false, true, false, true
         ]
     );
 }
