@@ -2,13 +2,15 @@ use super::*;
 use ambient_auction_api::{
     AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
     BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
-    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
-    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
-    PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicyV2Args,
-    SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
+    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind,
+    InitBundleVerifierPageV2Args, InitConfigPolicyV2Args, InstructionAccounts,
+    OpenBundleEscrowV2Args, PlaceBidArgs, PostBundleResultV2Args, PostBundleResultV3Args,
+    RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicySmallV3Args,
+    SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    error::AuctionError,
 };
 use solana_sdk::{
-    instruction::{Instruction, InstructionError},
+    instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::{MAX_SEED_LEN, Pubkey},
     transaction::TransactionError,
 };
@@ -260,9 +262,11 @@ fn context_aware_error_preserves_unknown_auction_custom_error() {
         decoded.auction_program_error(),
         Some(&AuctionProgramError::UnknownCustom(999))
     );
-    assert!(decoded
-        .to_string()
-        .contains("Unknown auction custom error code 999"));
+    assert!(
+        decoded
+            .to_string()
+            .contains("Unknown auction custom error code 999")
+    );
 }
 
 #[test]
@@ -844,6 +848,23 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(args.page_index, 3);
     assert_eq!(args.page_entry_count, 1);
     assert_eq!(args.page_entries[0], entry);
+
+    let small = post_bundle_result_v3(
+        crate::ID,
+        authority,
+        bundle_escrow,
+        bundle_verifier_page,
+        [8; 32],
+        55,
+        3,
+        &[entry],
+        &[123],
+    );
+    assert_eq!(std::mem::size_of::<PostBundleResultV3Args>(), 864);
+    assert_eq!(small.data.len(), 865);
+    assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
+    assert_eq!(&small.data[1..817], &instruction.data[1..]);
+    assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
 }
 
 #[test]
@@ -1038,6 +1059,25 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     assert_eq!(finalize.program_id, forced_program_id);
     assert_eq!(finalize.accounts[5].pubkey, expected_config_policy);
 
+    let remaining = [
+        AccountMeta::new_readonly(Pubkey::new_unique(), false),
+        AccountMeta::new(Pubkey::new_unique(), false),
+    ];
+    let finalize_with_remaining = finalize_bundle_verification_v2_with_remaining_accounts(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_node,
+        refund_recipient,
+        [4; 32],
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b011,
+        &remaining,
+    );
+    assert_eq!(&finalize_with_remaining.accounts[6..], &remaining);
+
     let claim_winner = claim_winner_lstake_v2(
         forced_program_id,
         bundle_escrow,
@@ -1069,6 +1109,17 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
     let replacement_authority = Pubkey::new_unique();
     let expected_config_policy = find_config_policy_for_program(program_id);
     let tier_config = RequestTierConfigV2::from_request_tier(RequestTier::Small);
+    let small_settings = set_config_policy_v2_small_credit_settings(
+        program_id,
+        authority,
+        true,
+        replacement_authority,
+    );
+    let slash_authority = set_config_policy_v2_small_credit_slash_authority(
+        program_id,
+        authority,
+        replacement_authority,
+    );
 
     let instructions = [
         set_config_policy_v2_flags(
@@ -1081,6 +1132,8 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
         set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
         set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
         set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+        slash_authority.clone(),
+        small_settings.clone(),
     ];
 
     for instruction in instructions {
@@ -1091,11 +1144,96 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
         );
         assert_eq!(
             instruction.data.len(),
-            1 + std::mem::size_of::<SetConfigPolicyV2Args>()
+            if matches!(instruction.data[1], 6 | 7) {
+                161
+            } else {
+                193
+            }
         );
         assert!(instruction.data.len() < 256);
         assert_eq!(instruction.accounts[0].pubkey, authority);
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
+
+    let args = SetConfigPolicySmallV3Args::try_from(&small_settings.data[1..]).unwrap();
+    assert_eq!(std::mem::size_of::<SetConfigPolicySmallV3Args>(), 160);
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
+    );
+    assert_eq!(args.small_credit_enabled, 1);
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+
+    let args = SetConfigPolicySmallV3Args::try_from(&slash_authority.data[1..]).unwrap();
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY
+    );
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+}
+
+#[test]
+fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
+    let program_id = Pubkey::new_unique();
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let token_account = Pubkey::new_unique();
+    let token_program = Pubkey::new_unique();
+    let instruction = slash_small_credits(
+        program_id,
+        authority,
+        mint,
+        token_account,
+        token_program,
+        2,
+        5,
+    );
+
+    assert_eq!(instruction.program_id, program_id);
+    assert_eq!(
+        instruction_pubkeys(&instruction),
+        vec![
+            authority,
+            find_config_policy_for_program(program_id),
+            mint,
+            token_account,
+            token_program,
+        ]
+    );
+    assert_eq!(
+        instruction
+            .accounts
+            .iter()
+            .map(|meta| (meta.is_signer, meta.is_writable))
+            .collect::<Vec<_>>(),
+        vec![
+            (true, false),
+            (false, true),
+            (false, true),
+            (false, true),
+            (false, false)
+        ]
+    );
+    assert_eq!(
+        instruction.data.len(),
+        1 + std::mem::size_of::<SlashSmallCreditsArgs>()
+    );
+    assert_eq!(
+        instruction.data[0],
+        AuctionInstruction::SlashSmallCredits as u8
+    );
+    assert_eq!(
+        SlashSmallCreditsArgs::try_from(&instruction.data[1..]).unwrap(),
+        SlashSmallCreditsArgs {
+            amount: 2,
+            sequence: 5,
+        }
+    );
 }
