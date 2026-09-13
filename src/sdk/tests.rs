@@ -260,9 +260,11 @@ fn context_aware_error_preserves_unknown_auction_custom_error() {
         decoded.auction_program_error(),
         Some(&AuctionProgramError::UnknownCustom(999))
     );
-    assert!(decoded
-        .to_string()
-        .contains("Unknown auction custom error code 999"));
+    assert!(
+        decoded
+            .to_string()
+            .contains("Unknown auction custom error code 999")
+    );
 }
 
 #[test]
@@ -407,21 +409,35 @@ fn verifier_selection_builders_use_initial_and_replacement_accounts() {
         initial.data,
         vec![AuctionInstruction::SelectBundleVerifiersV2 as u8]
     );
-    assert_eq!(initial.accounts.len(), 1);
+    assert_eq!(initial.accounts.len(), 3);
     assert_eq!(initial.accounts[0].pubkey, bundle_escrow);
     assert!(initial.accounts[0].is_writable);
     assert!(!initial.accounts[0].is_signer);
+    assert_eq!(
+        initial.accounts[1],
+        solana_sdk::instruction::AccountMeta::new_readonly(
+            solana_sdk::pubkey!("SysvarAuctionVerifiers111111111111111111111"),
+            false,
+        )
+    );
+    assert_eq!(
+        initial.accounts[2],
+        solana_sdk::instruction::AccountMeta::new_readonly(
+            solana_sdk::sysvar::slot_hashes::ID,
+            false,
+        )
+    );
 
     let replacement = select_replacement_bundle_verifiers_v2(program_id, bundle_escrow);
     assert_eq!(replacement.data, initial.data);
-    assert_eq!(replacement.accounts.len(), 2);
-    assert_eq!(replacement.accounts[0], initial.accounts[0]);
+    assert_eq!(replacement.accounts.len(), 4);
+    assert_eq!(replacement.accounts[..3], initial.accounts[..]);
     assert_eq!(
-        replacement.accounts[1].pubkey,
+        replacement.accounts[3].pubkey,
         find_bundle_verification_dispute_v2(program_id, bundle_escrow)
     );
-    assert!(replacement.accounts[1].is_writable);
-    assert!(!replacement.accounts[1].is_signer);
+    assert!(replacement.accounts[3].is_writable);
+    assert!(!replacement.accounts[3].is_signer);
 }
 
 #[test]

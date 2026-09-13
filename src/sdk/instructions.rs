@@ -907,6 +907,11 @@ fn select_bundle_verifiers_v2(
         bundle_verification_dispute.map(|key| AccountMeta::new(key, false));
     let account_metas = SelectBundleVerifiersV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        auction_verifiers: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_SYSVAR_ID),
+            false,
+        ),
+        slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
         bundle_verification_dispute: bundle_verification_dispute.as_ref(),
     };
 
