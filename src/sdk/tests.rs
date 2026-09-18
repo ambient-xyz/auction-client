@@ -865,6 +865,9 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
     assert_eq!(&small.data[1..817], &instruction.data[1..]);
     assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
+    assert_eq!(small.accounts, instruction.accounts);
+    let small_args = PostBundleResultV3Args::try_from(&small.data[1..]).unwrap();
+    assert_eq!(small_args.input_tokens, [123, 0, 0, 0, 0, 0]);
 }
 
 #[test]

@@ -25,7 +25,7 @@ use super::{
 };
 
 #[allow(clippy::too_many_arguments)]
-fn build_post_bundle_result_v2_instruction<D: InstructionBytes>(
+fn build_post_bundle_result_v2_instruction(
     target_program_id: Pubkey,
     authority: Pubkey,
     bundle_escrow: Pubkey,
@@ -34,7 +34,7 @@ fn build_post_bundle_result_v2_instruction<D: InstructionBytes>(
     posted_output_tokens: u64,
     page_index: u16,
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
-    wrap_data: impl FnOnce(PostBundleResultV2Args) -> D,
+    input_tokens: Option<[u64; ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES]>,
 ) -> Instruction {
     assert!(
         page_entries.len() <= ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES,
@@ -59,17 +59,22 @@ fn build_post_bundle_result_v2_instruction<D: InstructionBytes>(
         bundle_verifier_page: bundle_verifier_page_meta.as_ref(),
     };
 
+    let post = PostBundleResultV2Args {
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entry_count: page_entries.len() as u16,
+        _reserved: [0; 4],
+        page_entries: padded_page_entries,
+    };
+    let data = match input_tokens {
+        None => post.to_bytes(),
+        Some(input_tokens) => PostBundleResultV3Args { post, input_tokens }.to_bytes(),
+    };
+
     Instruction {
         program_id: target_program_id,
-        data: wrap_data(PostBundleResultV2Args {
-            result_hash,
-            posted_output_tokens,
-            page_index,
-            page_entry_count: page_entries.len() as u16,
-            _reserved: [0; 4],
-            page_entries: padded_page_entries,
-        })
-        .to_bytes(),
+        data,
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
@@ -831,7 +836,7 @@ pub fn post_bundle_result_v2(
         posted_output_tokens,
         page_index,
         page_entries,
-        std::convert::identity,
+        None,
     )
 }
 
@@ -868,10 +873,7 @@ pub fn post_bundle_result_v3(
         posted_output_tokens,
         page_index,
         page_entries,
-        |post| PostBundleResultV3Args {
-            post,
-            input_tokens: padded_input_tokens,
-        },
+        Some(padded_input_tokens),
     )
 }
 
@@ -891,7 +893,7 @@ pub fn post_bundle_result_v2_legacy(
         posted_output_tokens,
         0,
         &[],
-        std::convert::identity,
+        None,
     )
 }
 
