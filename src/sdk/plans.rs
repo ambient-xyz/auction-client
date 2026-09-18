@@ -124,11 +124,24 @@ pub fn request_job_plan(
         .map(|pubkey| AccountMeta::new(pubkey, false))
         .collect::<Vec<_>>();
 
+    // `Pubkey::default()` is all zeros, which is exactly the System Program address
+    // (`11111111111111111111111111111111`). Passing it through `AccountMeta::new` therefore requested a
+    // *write* lock on the System Program for every job request that carries no input data account.
+    // Two consequences: the runtime rejects a writable executable account, and even where it does not,
+    // write-locking a globally shared account serialises unrelated transactions against it. The
+    // placeholder must be read-only. The position is kept (rather than dropped) so the account list
+    // length stays fixed; the program learns whether a real account was supplied from the
+    // `input_data_account: MaybePubkey` field of the instruction data, not from this slot.
+    let input_data_meta = match input_data_account {
+        Some(key) => AccountMeta::new(key, false),
+        None => AccountMeta::new_readonly(account_keys.input_data, false),
+    };
+
     let accounts_infos = RequestJobAccounts {
         payer: &AccountMeta::new(account_keys.payer, true),
         job_request: &AccountMeta::new(account_keys.job_request, false),
         registry: &AccountMeta::new(account_keys.registry, false),
-        input_data: &AccountMeta::new(account_keys.input_data, false),
+        input_data: &input_data_meta,
         system_program: &AccountMeta::new_readonly(account_keys.system_program, false),
         #[cfg(feature = "global-config")]
         config: &AccountMeta::new(account_keys.config, false),
@@ -278,13 +291,21 @@ pub fn submit_job_plan(
         output_data_account: output_data_account.unwrap_or_default(),
     };
 
+    // See `request_job_plan`: an absent optional account collapses to `Pubkey::default()`, which is the
+    // System Program address, and `AccountMeta::new` would request a write lock on it. Use a read-only
+    // placeholder while keeping the slot so the account list length is unchanged.
+    let output_data_meta = match output_data_account {
+        Some(key) => AccountMeta::new(key, false),
+        None => AccountMeta::new_readonly(account_keys.output_data_account, false),
+    };
+
     let account_metas = SubmitJobOutputAccounts {
         bid_authority: &AccountMeta::new(account_keys.bid_authority, true),
         bundle: &AccountMeta::new(account_keys.bundle, false),
         job_request: &AccountMeta::new(account_keys.job_request, false),
         bid: &AccountMeta::new_readonly(account_keys.bid, false),
         auction: &AccountMeta::new_readonly(account_keys.auction, false),
-        output_data_account: &AccountMeta::new(account_keys.output_data_account, false),
+        output_data_account: &output_data_meta,
     };
 
     (
@@ -343,8 +364,10 @@ pub fn init_bundle_plan(
         Instruction {
             program_id,
             data: InitBundleArgs {
-                context_length_tier,
-                expiry_duration_tier,
+                // The instruction args store the tier as a validated raw `u64` wrapper. The emitted
+                // bytes are unchanged; only the Rust type differs.
+                context_length_tier: context_length_tier.into(),
+                expiry_duration_tier: expiry_duration_tier.into(),
                 bundle_lamports,
                 bundle_bump: bundle_bump.into(),
                 registry_bump: registry_bump.into(),

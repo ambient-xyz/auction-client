@@ -1,2 +1,15 @@
 /target
 .idea
+
+# Secrets and key material. A Solana keypair JSON is an unencrypted private key, and a single
+# accidental `git add` publishes a signing authority irrecoverably; environment files routinely hold
+# RPC tokens. Ignore the shapes those files actually take, and keep committed examples allowed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*-keypair.json
+*_keypair.json
+keypair.json
+id.json
