@@ -399,6 +399,7 @@ pub fn open_bundle_escrow_v5_plan(
     escrow_lamports: u64,
     expected_page_count: u8,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    assert!((1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count), "bundle must declare one to three verifier pages");
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
