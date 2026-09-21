@@ -2,13 +2,15 @@ use super::*;
 use ambient_auction_api::{
     AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
     BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
-    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
-    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV5Args, PlaceBidArgs,
-    PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicyV2Args,
-    SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
+    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind,
+    InitBundleVerifierPageV2Args, InitConfigPolicyV2Args, InstructionAccounts,
+    OpenBundleEscrowV5Args, PlaceBidArgs, PostBundleResultV2Args, PostBundleResultV3Args,
+    RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicySmallV3Args,
+    SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    error::AuctionError,
 };
 use solana_sdk::{
-    instruction::{Instruction, InstructionError},
+    instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::{MAX_SEED_LEN, Pubkey},
     transaction::TransactionError,
 };
@@ -848,6 +850,25 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(args.page_index, 3);
     assert_eq!(args.page_entry_count, 1);
     assert_eq!(args.page_entries[0], entry);
+
+    let small = post_bundle_result_v3(
+        crate::ID,
+        authority,
+        bundle_escrow,
+        bundle_verifier_page,
+        [8; 32],
+        55,
+        3,
+        &[entry],
+        &[123],
+    );
+    assert_eq!(small.data.len(), 865);
+    assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
+    assert_eq!(&small.data[1..817], &instruction.data[1..]);
+    assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
+    assert_eq!(small.accounts, instruction.accounts);
+    let small_args = PostBundleResultV3Args::try_from(&small.data[1..]).unwrap();
+    assert_eq!(small_args.input_tokens, [123, 0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -1044,6 +1065,25 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     assert_eq!(finalize.program_id, forced_program_id);
     assert_eq!(finalize.accounts[5].pubkey, expected_config_policy);
 
+    let remaining = [
+        AccountMeta::new_readonly(Pubkey::new_unique(), false),
+        AccountMeta::new(Pubkey::new_unique(), false),
+    ];
+    let finalize_with_remaining = finalize_bundle_verification_v2_with_remaining_accounts(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_node,
+        refund_recipient,
+        [4; 32],
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b011,
+        &remaining,
+    );
+    assert_eq!(&finalize_with_remaining.accounts[6..], &remaining);
+
     let claim_winner = claim_winner_lstake_v2(
         forced_program_id,
         bundle_escrow,
@@ -1069,41 +1109,139 @@ fn v2_instruction_builders_accept_explicit_program_id() {
 }
 
 #[test]
-fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
+fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
     let program_id = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
     let replacement_authority = Pubkey::new_unique();
     let expected_config_policy = find_config_policy_for_program(program_id);
     let tier_config = RequestTierConfigV2::from_request_tier(RequestTier::Small);
+    let small_settings = set_config_policy_v2_small_credit_settings(
+        program_id,
+        authority,
+        true,
+        replacement_authority,
+    );
+    let slash_authority = set_config_policy_v2_small_credit_slash_authority(
+        program_id,
+        authority,
+        replacement_authority,
+    );
 
     let instructions = [
-        set_config_policy_v2_flags(
-            program_id,
-            authority,
-            ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+        (
+            set_config_policy_v2_flags(
+                program_id,
+                authority,
+                ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+            ),
+            193,
         ),
-        set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
-        set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
-        set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+        (
+            set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
+            193,
+        ),
+        (
+            set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
+            193,
+        ),
+        (
+            set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
+            193,
+        ),
+        (
+            set_config_policy_v2_tier_config(
+                program_id,
+                authority,
+                RequestTier::Small,
+                tier_config,
+            ),
+            193,
+        ),
+        (
+            set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+            193,
+        ),
+        (slash_authority.clone(), 161),
+        (small_settings.clone(), 161),
     ];
 
-    for instruction in instructions {
+    for (instruction, expected_len) in instructions {
         assert_eq!(instruction.program_id, program_id);
         assert_eq!(
             instruction.data[0],
             AuctionInstruction::SetConfigPolicyV2 as u8
         );
-        assert_eq!(
-            instruction.data.len(),
-            1 + std::mem::size_of::<SetConfigPolicyV2Args>()
-        );
-        assert!(instruction.data.len() < 256);
+        assert_eq!(instruction.data.len(), expected_len);
         assert_eq!(instruction.accounts[0].pubkey, authority);
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
+
+    let args = SetConfigPolicySmallV3Args::try_from(&small_settings.data[1..]).unwrap();
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
+    );
+    assert_eq!(args.small_credit_enabled, 1);
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+
+    let args = SetConfigPolicySmallV3Args::try_from(&slash_authority.data[1..]).unwrap();
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY
+    );
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+}
+
+#[test]
+fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
+    let program_id = Pubkey::new_unique();
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let token_account = Pubkey::new_unique();
+    let token_program = Pubkey::new_unique();
+    let instruction = slash_small_credits(
+        program_id,
+        authority,
+        mint,
+        token_account,
+        token_program,
+        2,
+        5,
+    );
+
+    assert_eq!(instruction.program_id, program_id);
+    assert_eq!(
+        instruction.accounts,
+        vec![
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(find_config_policy_for_program(program_id), false),
+            AccountMeta::new(mint, false),
+            AccountMeta::new(token_account, false),
+            AccountMeta::new_readonly(token_program, false),
+        ]
+    );
+    assert_eq!(
+        instruction.data.len(),
+        1 + std::mem::size_of::<SlashSmallCreditsArgs>()
+    );
+    assert_eq!(
+        instruction.data[0],
+        AuctionInstruction::SlashSmallCredits as u8
+    );
+    assert_eq!(
+        SlashSmallCreditsArgs::try_from(&instruction.data[1..]).unwrap(),
+        SlashSmallCreditsArgs {
+            amount: 2,
+            sequence: 5,
+        }
+    );
 }
 
 #[test]

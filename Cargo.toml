@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ambient-auction-api = { git = "https://github.com/ambient-xyz/auction-api", rev = "1745a8b0b24f6aaab2093718e64e444d4be32711" }
+ambient-auction-api = { git = "https://github.com/ambient-xyz/auction-api", rev = "2ecc45b77f80adf1cfed20e7c110974d5319abc8" }
 lz4_flex = "0.11.6"
 solana-sdk = "2.3.1"
 solana-system-interface = "1.0.0"

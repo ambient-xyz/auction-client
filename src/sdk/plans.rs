@@ -399,6 +399,10 @@ pub fn open_bundle_escrow_v5_plan(
     escrow_lamports: u64,
     expected_page_count: u8,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    assert!(
+        (1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count),
+        "bundle must declare one to three verifier pages"
+    );
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
@@ -437,4 +441,47 @@ pub fn open_bundle_escrow_v5_plan(
         },
         account_keys,
     )
+}
+
+/// SmallV3 retains its separate historical creation protocol.
+#[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v3_plan(
+    target_program_id: Pubkey,
+    payer: impl ToClientPubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: impl ToClientPubkey,
+    requester_refund_recipient: impl ToClientPubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    let coordinator = coordinator.to_client_pubkey();
+    let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
+    let (mut instruction, keys) = open_bundle_escrow_v5_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        RequestTier::Small,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+        1,
+    );
+    instruction.data = OpenBundleEscrowV2Args {
+        bundle_version,
+        _reserved0: [0; 4],
+        reward_tier: u64::from(RequestTier::Small),
+        bundle_hash,
+        coordinator: coordinator.to_bytes(),
+        requester_refund_recipient: requester_refund_recipient.to_bytes(),
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+    }
+    .to_bytes();
+    (instruction, keys)
 }
