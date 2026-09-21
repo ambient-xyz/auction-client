@@ -386,7 +386,7 @@ pub fn init_config_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v2_plan(
+pub fn open_bundle_escrow_v5_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
@@ -397,6 +397,7 @@ pub fn open_bundle_escrow_v2_plan(
     total_input_tokens: u64,
     max_output_tokens: u64,
     escrow_lamports: u64,
+    expected_page_count: u8,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
@@ -418,7 +419,7 @@ pub fn open_bundle_escrow_v2_plan(
     (
         Instruction {
             program_id: target_program_id,
-            data: OpenBundleEscrowV2Args {
+            data: OpenBundleEscrowV5Args {
                 bundle_version,
                 _reserved0: [0; 4],
                 reward_tier: u64::from(reward_tier),
@@ -428,6 +429,8 @@ pub fn open_bundle_escrow_v2_plan(
                 total_input_tokens,
                 max_output_tokens,
                 escrow_lamports,
+                expected_page_count,
+                _reserved1: [0; 7],
             }
             .to_bytes(),
             accounts: account_metas.iter_owned().collect::<Vec<_>>(),

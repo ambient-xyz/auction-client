@@ -27,7 +27,7 @@ dependencies = [
 [[package]]
 name = "ambient-auction-api"
 version = "0.1.0"
-source = "git+https://github.com/ambient-xyz/auction-api?rev=0fcb946eb13aaf031fa173574648c14eed19a665#0fcb946eb13aaf031fa173574648c14eed19a665"
+source = "git+https://github.com/ambient-xyz/auction-api?rev=1745a8b0b24f6aaab2093718e64e444d4be32711#1745a8b0b24f6aaab2093718e64e444d4be32711"
 dependencies = [
  "bytemuck",
  "five8_const 1.0.0",
@@ -40,7 +40,9 @@ name = "ambient-auction-client"
 version = "0.1.0"
 dependencies = [
  "ambient-auction-api",
+ "bincode",
  "lz4_flex",
+ "solana-ed25519-program",
  "solana-sdk",
  "solana-system-interface",
  "solana-vote-interface",
