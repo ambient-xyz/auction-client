@@ -1,3 +1,9 @@
+//! Builders for newer V2 and SmallV3 programs; the target program must support the
+//! chosen format. Generic policy helpers emit newer V2 payloads (617/193 bytes),
+//! while SmallV3 program revision `4f7756b` expects 585/161 bytes. The Small settings
+//! helpers retain that shorter format. Newer V2 calls require a matching program
+//! upgrade that also preserves the Small settlement and slashing paths in use.
+
 use crate::ID as program_id;
 use ambient_auction_api::state::{
     ConfigPolicyV2, ConfigPolicyV2Flags, RequestTier, RequestTierConfigV2,

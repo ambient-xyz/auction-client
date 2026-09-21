@@ -860,7 +860,6 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
         &[entry],
         &[123],
     );
-    assert_eq!(std::mem::size_of::<PostBundleResultV3Args>(), 864);
     assert_eq!(small.data.len(), 865);
     assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
     assert_eq!(&small.data[1..817], &instruction.data[1..]);
@@ -1106,7 +1105,7 @@ fn v2_instruction_builders_accept_explicit_program_id() {
 }
 
 #[test]
-fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
+fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
     let program_id = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
     let replacement_authority = Pubkey::new_unique();
@@ -1125,42 +1124,56 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
     );
 
     let instructions = [
-        set_config_policy_v2_flags(
-            program_id,
-            authority,
-            ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+        (
+            set_config_policy_v2_flags(
+                program_id,
+                authority,
+                ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+            ),
+            193,
         ),
-        set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
-        set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
-        set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
-        slash_authority.clone(),
-        small_settings.clone(),
+        (
+            set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
+            193,
+        ),
+        (
+            set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
+            193,
+        ),
+        (
+            set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
+            193,
+        ),
+        (
+            set_config_policy_v2_tier_config(
+                program_id,
+                authority,
+                RequestTier::Small,
+                tier_config,
+            ),
+            193,
+        ),
+        (
+            set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+            193,
+        ),
+        (slash_authority.clone(), 161),
+        (small_settings.clone(), 161),
     ];
 
-    for instruction in instructions {
+    for (instruction, expected_len) in instructions {
         assert_eq!(instruction.program_id, program_id);
         assert_eq!(
             instruction.data[0],
             AuctionInstruction::SetConfigPolicyV2 as u8
         );
-        assert_eq!(
-            instruction.data.len(),
-            if matches!(instruction.data[1], 6 | 7) {
-                161
-            } else {
-                193
-            }
-        );
-        assert!(instruction.data.len() < 256);
+        assert_eq!(instruction.data.len(), expected_len);
         assert_eq!(instruction.accounts[0].pubkey, authority);
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
 
     let args = SetConfigPolicySmallV3Args::try_from(&small_settings.data[1..]).unwrap();
-    assert_eq!(std::mem::size_of::<SetConfigPolicySmallV3Args>(), 160);
     assert_eq!(
         args.patch_kind,
         ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
@@ -1201,27 +1214,13 @@ fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
 
     assert_eq!(instruction.program_id, program_id);
     assert_eq!(
-        instruction_pubkeys(&instruction),
+        instruction.accounts,
         vec![
-            authority,
-            find_config_policy_for_program(program_id),
-            mint,
-            token_account,
-            token_program,
-        ]
-    );
-    assert_eq!(
-        instruction
-            .accounts
-            .iter()
-            .map(|meta| (meta.is_signer, meta.is_writable))
-            .collect::<Vec<_>>(),
-        vec![
-            (true, false),
-            (false, true),
-            (false, true),
-            (false, true),
-            (false, false)
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(find_config_policy_for_program(program_id), false),
+            AccountMeta::new(mint, false),
+            AccountMeta::new(token_account, false),
+            AccountMeta::new_readonly(token_program, false),
         ]
     );
     assert_eq!(
