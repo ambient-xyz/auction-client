@@ -1111,21 +1111,36 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
 fn packed_signatures_verify_with_the_ed25519_precompile() {
     use solana_sdk::{signature::Keypair, signer::Signer};
     let signers = [Keypair::new(), Keypair::new()];
-    let message = [42; 232];
-    let signatures = signers.map(|signer| (signer.pubkey(), signer.sign_message(&message)));
-    let features = solana_sdk::feature_set::FeatureSet::all_enabled();
-    for count in 1..=2 {
-        let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
-        assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
-        let mut wrong_message = instruction.data.clone();
-        *wrong_message.last_mut().unwrap() ^= 1;
-        assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
-        let mut wrong_signature = instruction.data;
-        wrong_signature[2 + count * 14 + 32] ^= 1;
-        assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
+    let messages = [
+        vec![42; 232],
+        ambient_auction_api::BundleDisputeEvidenceV5Message::new(
+            [1; 32],
+            33,
+            109,
+            2,
+            [2; 32],
+            [[3; 32], [4; 32], [0; 32]],
+        )
+        .to_bytes(),
+    ];
+    for message in messages {
+        let signatures = signers
+            .each_ref()
+            .map(|signer| (signer.pubkey(), signer.sign_message(&message)));
+        let features = solana_sdk::feature_set::FeatureSet::all_enabled();
+        for count in 1..=2 {
+            let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
+            assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
+            let mut wrong_message = instruction.data.clone();
+            *wrong_message.last_mut().unwrap() ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
+            let mut wrong_signature = instruction.data;
+            wrong_signature[2 + count * 14 + 32] ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
+        }
+        assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
+        assert!(packed_ed25519_instruction(&[], &message).is_err());
     }
-    assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
-    assert!(packed_ed25519_instruction(&[], &message).is_err());
 }
 
 #[test]

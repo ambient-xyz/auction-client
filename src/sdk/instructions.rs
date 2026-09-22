@@ -55,6 +55,7 @@ fn build_post_bundle_result_v2_instruction(
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         config_policy: &AccountMeta::new(config_policy, false),
         bundle_verifier_page: bundle_verifier_page_meta.as_ref(),
+        bundle_verification_dispute: None,
     };
 
     Instruction {
@@ -1073,6 +1074,70 @@ pub fn close_bundle_verifier_page_v5(
         }
         .to_bytes(),
     }
+}
+
+pub fn authorize_bundle_dispute_evidence_v5(
+    target_program_id: Pubkey,
+    submitter: Pubkey,
+    bundle_escrow: Pubkey,
+    verification_hash: [u8; 32],
+    page_hashes: [[u8; 32]; ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES as usize],
+    quorum_verifier_bitmap: u8,
+) -> Instruction {
+    Instruction {
+        program_id: target_program_id,
+        accounts: vec![
+            AccountMeta::new_readonly(submitter, true),
+            AccountMeta::new_readonly(bundle_escrow, false),
+            AccountMeta::new(
+                find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+                false,
+            ),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::ID, false),
+        ],
+        data: AuthorizeBundleDisputeEvidenceV5Args {
+            verification_hash,
+            page_hashes,
+            quorum_verifier_bitmap,
+            _reserved: [0; 7],
+        }
+        .to_bytes(),
+    }
+}
+
+/// Hash the evidence bytes, excluding the page's funder and lifecycle metadata.
+pub fn bundle_dispute_evidence_page_hash(page_bytes: &[u8]) -> Result<[u8; 32], &'static str> {
+    let evidence = ambient_auction_api::bundle_verifier_page_hash_bytes(page_bytes)
+        .ok_or("invalid verifier page layout")?;
+    Ok(solana_sdk::hash::hash(evidence).to_bytes())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn post_bundle_dispute_result_v2(
+    target_program_id: Pubkey,
+    submitter: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verifier_page: Pubkey,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+    page_index: u16,
+    page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
+) -> Instruction {
+    let mut instruction = post_bundle_result_v2(
+        target_program_id,
+        submitter,
+        bundle_escrow,
+        bundle_verifier_page,
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entries,
+    );
+    instruction.accounts.push(AccountMeta::new_readonly(
+        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+        false,
+    ));
+    instruction
 }
 
 /// Verify one or two signatures over the same message in a single precompile instruction.
