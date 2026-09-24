@@ -3,7 +3,7 @@ use ambient_auction_api::{
     AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
     BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
     ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
-    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV2Args, PlaceBidArgs,
+    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV5Args, PlaceBidArgs,
     PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicyV2Args,
     SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
 };
@@ -260,9 +260,11 @@ fn context_aware_error_preserves_unknown_auction_custom_error() {
         decoded.auction_program_error(),
         Some(&AuctionProgramError::UnknownCustom(999))
     );
-    assert!(decoded
-        .to_string()
-        .contains("Unknown auction custom error code 999"));
+    assert!(
+        decoded
+            .to_string()
+            .contains("Unknown auction custom error code 999")
+    );
 }
 
 #[test]
@@ -360,7 +362,7 @@ fn init_bundle_verifier_page_v2_uses_canonical_page_pda_and_encoded_args() {
     assert!(instruction.accounts[0].is_signer);
     assert!(instruction.accounts[0].is_writable);
     assert_eq!(instruction.accounts[1].pubkey, bundle_escrow);
-    assert!(!instruction.accounts[1].is_writable);
+    assert!(instruction.accounts[1].is_writable);
     assert_eq!(instruction.accounts[2].pubkey, expected_page);
     assert!(instruction.accounts[2].is_writable);
     assert_eq!(
@@ -760,13 +762,13 @@ fn submit_job_plan_matches_builder_and_find_helpers() {
 }
 
 #[test]
-fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
+fn open_bundle_escrow_v5_plan_matches_builder_and_find_helpers() {
     let payer = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();
     let requester_refund_recipient = Pubkey::new_unique();
     let bundle_hash = [4; 32];
 
-    let (planned_instruction, account_keys) = open_bundle_escrow_v2_plan(
+    let (planned_instruction, account_keys) = open_bundle_escrow_v5_plan(
         crate::ID,
         payer.to_bytes(),
         2,
@@ -777,8 +779,9 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         100,
         200,
         300,
+        1,
     );
-    let instruction = open_bundle_escrow_v2(
+    let instruction = open_bundle_escrow_v5(
         crate::ID,
         payer,
         2,
@@ -789,6 +792,7 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         100,
         200,
         300,
+        1,
     );
 
     assert_eq!(planned_instruction, instruction);
@@ -805,7 +809,7 @@ fn open_bundle_escrow_v2_plan_matches_builder_and_find_helpers() {
         instruction_pubkeys(&instruction)
     );
 
-    let args = OpenBundleEscrowV2Args::try_from(&instruction.data[1..]).unwrap();
+    let args = OpenBundleEscrowV5Args::try_from(&instruction.data[1..]).unwrap();
     assert_eq!(args.reward_tier, u64::from(RequestTier::Pro));
     assert_eq!(args.total_input_tokens, 100);
     assert_eq!(args.max_output_tokens, 200);
@@ -899,14 +903,14 @@ fn v2_key_helpers_accept_explicit_program_id() {
 }
 
 #[test]
-fn open_bundle_escrow_v2_plan_supports_explicit_program_id() {
+fn open_bundle_escrow_v5_plan_supports_explicit_program_id() {
     let forced_program_id = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();
     let requester_refund_recipient = Pubkey::new_unique();
     let bundle_hash = [4; 32];
 
-    let (planned_instruction, account_keys) = open_bundle_escrow_v2_plan(
+    let (planned_instruction, account_keys) = open_bundle_escrow_v5_plan(
         forced_program_id,
         payer.to_bytes(),
         2,
@@ -917,8 +921,9 @@ fn open_bundle_escrow_v2_plan_supports_explicit_program_id() {
         100,
         200,
         300,
+        1,
     );
-    let instruction = open_bundle_escrow_v2(
+    let instruction = open_bundle_escrow_v5(
         forced_program_id,
         payer,
         2,
@@ -929,6 +934,7 @@ fn open_bundle_escrow_v2_plan_supports_explicit_program_id() {
         100,
         200,
         300,
+        1,
     );
     let expected_bundle_escrow =
         find_bundle_escrow_for_program(forced_program_id, payer, bundle_hash, 2);
@@ -1097,5 +1103,96 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
         assert_eq!(instruction.accounts[0].pubkey, authority);
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn packed_signatures_verify_with_the_ed25519_precompile() {
+    use solana_sdk::{signature::Keypair, signer::Signer};
+    let signers = [Keypair::new(), Keypair::new()];
+    let messages = [
+        vec![42; 232],
+        ambient_auction_api::BundleDisputeEvidenceV5Message::new(
+            [1; 32],
+            33,
+            109,
+            2,
+            [2; 32],
+            [[3; 32], [4; 32], [0; 32]],
+        )
+        .to_bytes(),
+    ];
+    for message in messages {
+        let signatures = signers
+            .each_ref()
+            .map(|signer| (signer.pubkey(), signer.sign_message(&message)));
+        let features = solana_sdk::feature_set::FeatureSet::all_enabled();
+        for count in 1..=2 {
+            let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
+            assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
+            let mut wrong_message = instruction.data.clone();
+            *wrong_message.last_mut().unwrap() ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
+            let mut wrong_signature = instruction.data;
+            wrong_signature[2 + count * 14 + 32] ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
+        }
+        assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
+        assert!(packed_ed25519_instruction(&[], &message).is_err());
+    }
+}
+
+#[test]
+fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction, message::Message, signature::Keypair,
+        signer::Signer, transaction::Transaction,
+    };
+    let payer = Keypair::new();
+    let first = Keypair::new();
+    let second = Keypair::new();
+    let message = [42; 232];
+    let verify = packed_ed25519_instruction(
+        &[
+            (first.pubkey(), first.sign_message(&message)),
+            (second.pubkey(), second.sign_message(&message)),
+        ],
+        &message,
+    )
+    .unwrap();
+    for (page_count, expected_size) in [(3, 1231), (4, 1297)] {
+        let pages: Vec<_> = (0..page_count)
+            .map(|_| (Pubkey::new_unique(), Pubkey::new_unique()))
+            .collect();
+        let finalize = finalize_disputed_bundle_verification_v2(
+            crate::ID,
+            payer.pubkey(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            [7; 32],
+            10,
+            50,
+            VerificationVerdictV2::Verified,
+            0b011,
+            &pages,
+        );
+        let tx = Transaction::new_unsigned(Message::new(
+            &[
+                ComputeBudgetInstruction::set_compute_unit_limit(400_000),
+                ComputeBudgetInstruction::set_compute_unit_price(1),
+                verify.clone(),
+                finalize,
+            ],
+            Some(&payer.pubkey()),
+        ));
+        let size = bincode::serialize(&tx).unwrap().len();
+        assert_eq!(size, expected_size);
+        assert_eq!(
+            size <= solana_sdk::packet::PACKET_DATA_SIZE,
+            page_count == 3
+        );
     }
 }
