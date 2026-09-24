@@ -599,26 +599,10 @@ fn request_job_plan_matches_builder_and_find_helpers() {
     );
     assert_eq!(instruction.accounts[1].pubkey, account_keys.job_request);
     assert_eq!(instruction.accounts[2].pubkey, account_keys.registry);
-    #[cfg(not(feature = "global-config"))]
-    {
-        assert_eq!(
-            instruction.accounts[5].pubkey,
-            account_keys.bundle_auction_account_pairs[0]
-        );
-        assert_eq!(
-            instruction.accounts[6].pubkey,
-            account_keys.bundle_auction_account_pairs[1]
-        );
-        assert_eq!(
-            instruction.accounts[7].pubkey,
-            account_keys.bundle_auction_account_pairs[2]
-        );
-        assert_eq!(
-            instruction.accounts[8].pubkey,
-            account_keys.bundle_auction_account_pairs[3]
-        );
-    }
-    #[cfg(feature = "global-config")]
+    assert_eq!(
+        instruction.accounts[5],
+        solana_sdk::instruction::AccountMeta::new(find_config(), false)
+    );
     {
         assert_eq!(
             instruction.accounts[6].pubkey,

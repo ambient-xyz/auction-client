@@ -5,14 +5,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ambient-auction-api = { git = "https://github.com/ambient-xyz/auction-api", rev = "0d373fcb7dccfdae896698b91b2ef8c1bf064147" }
+ambient-auction-api = { git = "https://github.com/ambient-xyz/auction-api", rev = "c781f30451926b93536fcb1577f958730366a400" }
 lz4_flex = "0.11.6"
 solana-sdk = "2.3.1"
 solana-system-interface = "1.0.0"
 solana-vote-interface = "2.2.6"
 
 [features]
-global-config = ["ambient-auction-api/global-config"]
 default = []
 
 [dev-dependencies]

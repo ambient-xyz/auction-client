@@ -106,7 +106,6 @@ pub fn find_job_request(
     .0
 }
 
-#[cfg(feature = "global-config")]
 pub fn find_config() -> Pubkey {
     Pubkey::find_program_address(&[CONFIG_SEED], &program_id).0
 }
