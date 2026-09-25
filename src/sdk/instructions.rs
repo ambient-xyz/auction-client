@@ -15,7 +15,6 @@ use solana_vote_interface::program as vote;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 
-#[cfg(feature = "global-config")]
 use super::init_config_plan;
 use super::{
     find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
@@ -401,7 +400,6 @@ pub fn init_bundle(
     .0
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     init_config_plan(payer, args).0
 }
