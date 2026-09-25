@@ -1,14 +1,15 @@
 use super::*;
 use ambient_auction_api::{
-    AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
-    BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
-    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, InitBundleVerifierPageV2Args,
+    AuctionInstruction, BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
+    BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
+    ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind, InitBundleVerifierPageV2Args,
     InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV5Args, PlaceBidArgs,
-    PostBundleResultV2Args, RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicyV2Args,
-    SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
+    PostBundleResultV2Args, PostBundleResultV3Args, RequestTier, RequestTierConfigV2,
+    RevealBidArgs, SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs,
+    VerificationVerdictV2, error::AuctionError,
 };
 use solana_sdk::{
-    instruction::{Instruction, InstructionError},
+    instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::{MAX_SEED_LEN, Pubkey},
     transaction::TransactionError,
 };
@@ -80,22 +81,6 @@ fn find_bundle_verifier_page_for_program(
     Pubkey::find_program_address(
         &[
             BUNDLE_VERIFIER_PAGE_V2_SEED,
-            bundle_escrow.as_ref(),
-            page_index.to_le_bytes().as_ref(),
-        ],
-        &program_id,
-    )
-    .0
-}
-
-fn find_bundle_dispute_verifier_page_for_program(
-    program_id: Pubkey,
-    bundle_escrow: Pubkey,
-    page_index: u16,
-) -> Pubkey {
-    Pubkey::find_program_address(
-        &[
-            BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED,
             bundle_escrow.as_ref(),
             page_index.to_le_bytes().as_ref(),
         ],
@@ -316,25 +301,6 @@ fn flexible_key_inputs_resolve_to_same_pubkeys() {
         find_bundle_verifier_page_v2(crate::ID, bundle_escrow, 3),
         find_bundle_verifier_page_v2(crate::ID, &bundle_escrow_bytes, 3)
     );
-    assert_eq!(
-        find_bundle_dispute_verifier_page_v2(crate::ID, bundle_escrow, 3),
-        find_bundle_dispute_verifier_page_v2(crate::ID, &bundle_escrow_bytes, 3)
-    );
-}
-
-#[test]
-fn bundle_dispute_verifier_page_v2_uses_distinct_seed() {
-    let program_id = Pubkey::new_unique();
-    let bundle_escrow = Pubkey::new_unique();
-    let page_index = 3;
-    let canonical = find_bundle_verifier_page_v2(program_id, bundle_escrow, page_index);
-    let dispute = find_bundle_dispute_verifier_page_v2(program_id, bundle_escrow, page_index);
-
-    assert_ne!(dispute, canonical);
-    assert_eq!(
-        dispute,
-        find_bundle_dispute_verifier_page_for_program(program_id, bundle_escrow, page_index)
-    );
 }
 
 #[test]
@@ -374,32 +340,7 @@ fn init_bundle_verifier_page_v2_uses_canonical_page_pda_and_encoded_args() {
 }
 
 #[test]
-fn init_bundle_dispute_verifier_page_v2_uses_staging_page_pda() {
-    let program_id = Pubkey::new_unique();
-    let payer = Pubkey::new_unique();
-    let bundle_escrow = Pubkey::new_unique();
-    let page_index = 7;
-    let lamports = 12_345;
-    let expected_page =
-        find_bundle_dispute_verifier_page_for_program(program_id, bundle_escrow, page_index);
-
-    let instruction = init_bundle_dispute_verifier_page_v2(
-        program_id,
-        payer,
-        bundle_escrow,
-        page_index,
-        lamports,
-    );
-    let args = InitBundleVerifierPageV2Args::try_from(&instruction.data[1..]).unwrap();
-
-    assert_eq!(instruction.accounts[2].pubkey, expected_page);
-    assert!(instruction.accounts[2].is_writable);
-    assert_eq!(args.bundle_verifier_page_lamports, lamports);
-    assert_eq!(args.page_index, page_index);
-}
-
-#[test]
-fn verifier_selection_builders_use_initial_and_replacement_accounts() {
+fn verifier_selection_builder_uses_only_the_escrow() {
     let program_id = Pubkey::new_unique();
     let bundle_escrow = Pubkey::new_unique();
 
@@ -413,91 +354,6 @@ fn verifier_selection_builders_use_initial_and_replacement_accounts() {
     assert_eq!(initial.accounts[0].pubkey, bundle_escrow);
     assert!(initial.accounts[0].is_writable);
     assert!(!initial.accounts[0].is_signer);
-
-    let replacement = select_replacement_bundle_verifiers_v2(program_id, bundle_escrow);
-    assert_eq!(replacement.data, initial.data);
-    assert_eq!(replacement.accounts.len(), 2);
-    assert_eq!(replacement.accounts[0], initial.accounts[0]);
-    assert_eq!(
-        replacement.accounts[1].pubkey,
-        find_bundle_verification_dispute_v2(program_id, bundle_escrow)
-    );
-    assert!(replacement.accounts[1].is_writable);
-    assert!(!replacement.accounts[1].is_signer);
-}
-
-#[test]
-fn disputed_finalize_emits_staging_canonical_pairs_with_exact_access() {
-    let program_id = Pubkey::new_unique();
-    let coordinator = Pubkey::new_unique();
-    let bundle_escrow = Pubkey::new_unique();
-    let winner_node = Pubkey::new_unique();
-    let requester_refund_recipient = Pubkey::new_unique();
-    let bond_refund_recipient = Pubkey::new_unique();
-    let staging0 = Pubkey::new_unique();
-    let canonical0 = Pubkey::new_unique();
-    let staging1 = Pubkey::new_unique();
-    let canonical1 = Pubkey::new_unique();
-    let verification_hash = [9; 32];
-    let pairs = [(staging0, canonical0), (staging1, canonical1)];
-
-    let instruction = finalize_disputed_bundle_verification_v2(
-        program_id,
-        coordinator,
-        bundle_escrow,
-        winner_node,
-        requester_refund_recipient,
-        bond_refund_recipient,
-        verification_hash,
-        29,
-        17,
-        VerificationVerdictV2::Verified,
-        0b101,
-        &pairs,
-    );
-    let ordinary = finalize_bundle_verification_v2(
-        program_id,
-        coordinator,
-        bundle_escrow,
-        winner_node,
-        requester_refund_recipient,
-        verification_hash,
-        29,
-        17,
-        VerificationVerdictV2::Verified,
-        0b101,
-        &[],
-    );
-
-    assert_eq!(instruction.data, ordinary.data);
-    assert_eq!(
-        instruction_pubkeys(&instruction),
-        vec![
-            coordinator,
-            bundle_escrow,
-            winner_node,
-            requester_refund_recipient,
-            solana_sdk::sysvar::instructions::ID,
-            find_config_policy_for_program(program_id),
-            find_bundle_verification_dispute_v2(program_id, bundle_escrow),
-            bond_refund_recipient,
-            solana_sdk::incinerator::ID,
-            staging0,
-            canonical0,
-            staging1,
-            canonical1,
-        ]
-    );
-    assert_eq!(
-        instruction
-            .accounts
-            .iter()
-            .map(|meta| meta.is_writable)
-            .collect::<Vec<_>>(),
-        vec![
-            true, true, true, true, false, true, true, true, true, false, true, false, true
-        ]
-    );
 }
 
 #[test]
@@ -832,6 +688,25 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(args.page_index, 3);
     assert_eq!(args.page_entry_count, 1);
     assert_eq!(args.page_entries[0], entry);
+
+    let small = post_bundle_result_v3(
+        crate::ID,
+        authority,
+        bundle_escrow,
+        bundle_verifier_page,
+        [8; 32],
+        55,
+        3,
+        &[entry],
+        &[123],
+    );
+    assert_eq!(small.data.len(), 865);
+    assert_eq!(small.data[0], AuctionInstruction::PostBundleResultV2 as u8);
+    assert_eq!(&small.data[1..817], &instruction.data[1..]);
+    assert_eq!(&small.data[817..825], &123u64.to_le_bytes());
+    assert_eq!(small.accounts, instruction.accounts);
+    let small_args = PostBundleResultV3Args::try_from(&small.data[1..]).unwrap();
+    assert_eq!(small_args.input_tokens, [123, 0, 0, 0, 0, 0]);
 }
 
 #[test]
@@ -1028,6 +903,25 @@ fn v2_instruction_builders_accept_explicit_program_id() {
     assert_eq!(finalize.program_id, forced_program_id);
     assert_eq!(finalize.accounts[5].pubkey, expected_config_policy);
 
+    let remaining = [
+        AccountMeta::new_readonly(Pubkey::new_unique(), false),
+        AccountMeta::new(Pubkey::new_unique(), false),
+    ];
+    let finalize_with_remaining = finalize_bundle_verification_v2_with_remaining_accounts(
+        forced_program_id,
+        authority,
+        bundle_escrow,
+        winner_node,
+        refund_recipient,
+        [4; 32],
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b011,
+        &remaining,
+    );
+    assert_eq!(&finalize_with_remaining.accounts[6..], &remaining);
+
     let claim_winner = claim_winner_lstake_v2(
         forced_program_id,
         bundle_escrow,
@@ -1053,41 +947,139 @@ fn v2_instruction_builders_accept_explicit_program_id() {
 }
 
 #[test]
-fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
+fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
     let program_id = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
     let replacement_authority = Pubkey::new_unique();
     let expected_config_policy = find_config_policy_for_program(program_id);
     let tier_config = RequestTierConfigV2::from_request_tier(RequestTier::Small);
+    let small_settings = set_config_policy_v2_small_credit_settings(
+        program_id,
+        authority,
+        true,
+        replacement_authority,
+    );
+    let slash_authority = set_config_policy_v2_small_credit_slash_authority(
+        program_id,
+        authority,
+        replacement_authority,
+    );
 
     let instructions = [
-        set_config_policy_v2_flags(
-            program_id,
-            authority,
-            ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+        (
+            set_config_policy_v2_flags(
+                program_id,
+                authority,
+                ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
+            ),
+            161,
         ),
-        set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
-        set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
-        set_config_policy_v2_tier_config(program_id, authority, RequestTier::Small, tier_config),
-        set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+        (
+            set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
+            161,
+        ),
+        (
+            set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
+            161,
+        ),
+        (
+            set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
+            161,
+        ),
+        (
+            set_config_policy_v2_tier_config(
+                program_id,
+                authority,
+                RequestTier::Small,
+                tier_config,
+            ),
+            161,
+        ),
+        (
+            set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
+            161,
+        ),
+        (slash_authority.clone(), 161),
+        (small_settings.clone(), 161),
     ];
 
-    for instruction in instructions {
+    for (instruction, expected_len) in instructions {
         assert_eq!(instruction.program_id, program_id);
         assert_eq!(
             instruction.data[0],
             AuctionInstruction::SetConfigPolicyV2 as u8
         );
-        assert_eq!(
-            instruction.data.len(),
-            1 + std::mem::size_of::<SetConfigPolicyV2Args>()
-        );
-        assert!(instruction.data.len() < 256);
+        assert_eq!(instruction.data.len(), expected_len);
         assert_eq!(instruction.accounts[0].pubkey, authority);
         assert!(instruction.accounts[0].is_signer);
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
+
+    let args = SetConfigPolicyV2Args::try_from(&small_settings.data[1..]).unwrap();
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
+    );
+    assert_eq!(args.small_credit_enabled, 1);
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+
+    let args = SetConfigPolicyV2Args::try_from(&slash_authority.data[1..]).unwrap();
+    assert_eq!(
+        args.patch_kind,
+        ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY
+    );
+    assert_eq!(
+        Pubkey::new_from_array(args.authority.inner()),
+        replacement_authority
+    );
+}
+
+#[test]
+fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
+    let program_id = Pubkey::new_unique();
+    let authority = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let token_account = Pubkey::new_unique();
+    let token_program = Pubkey::new_unique();
+    let instruction = slash_small_credits(
+        program_id,
+        authority,
+        mint,
+        token_account,
+        token_program,
+        2,
+        5,
+    );
+
+    assert_eq!(instruction.program_id, program_id);
+    assert_eq!(
+        instruction.accounts,
+        vec![
+            AccountMeta::new_readonly(authority, true),
+            AccountMeta::new(find_config_policy_for_program(program_id), false),
+            AccountMeta::new(mint, false),
+            AccountMeta::new(token_account, false),
+            AccountMeta::new_readonly(token_program, false),
+        ]
+    );
+    assert_eq!(
+        instruction.data.len(),
+        1 + std::mem::size_of::<SlashSmallCreditsArgs>()
+    );
+    assert_eq!(
+        instruction.data[0],
+        AuctionInstruction::SlashSmallCredits as u8
+    );
+    assert_eq!(
+        SlashSmallCreditsArgs::try_from(&instruction.data[1..]).unwrap(),
+        SlashSmallCreditsArgs {
+            amount: 2,
+            sequence: 5,
+        }
+    );
 }
 
 #[test]
@@ -1095,40 +1087,25 @@ fn set_config_policy_v2_helpers_emit_packet_safe_patch_instructions() {
 fn packed_signatures_verify_with_the_ed25519_precompile() {
     use solana_sdk::{signature::Keypair, signer::Signer};
     let signers = [Keypair::new(), Keypair::new()];
-    let messages = [
-        vec![42; 232],
-        ambient_auction_api::BundleDisputeEvidenceV5Message::new(
-            [1; 32],
-            33,
-            109,
-            2,
-            [2; 32],
-            [[3; 32], [4; 32], [0; 32]],
-        )
-        .to_bytes(),
-    ];
-    for message in messages {
-        let signatures = signers
-            .each_ref()
-            .map(|signer| (signer.pubkey(), signer.sign_message(&message)));
-        let features = solana_sdk::feature_set::FeatureSet::all_enabled();
-        for count in 1..=2 {
-            let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
-            assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
-            let mut wrong_message = instruction.data.clone();
-            *wrong_message.last_mut().unwrap() ^= 1;
-            assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
-            let mut wrong_signature = instruction.data;
-            wrong_signature[2 + count * 14 + 32] ^= 1;
-            assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
-        }
-        assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
-        assert!(packed_ed25519_instruction(&[], &message).is_err());
+    let message = [42; 232];
+    let signatures = signers.map(|signer| (signer.pubkey(), signer.sign_message(&message)));
+    let features = solana_sdk::feature_set::FeatureSet::all_enabled();
+    for count in 1..=2 {
+        let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
+        assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
+        let mut wrong_message = instruction.data.clone();
+        *wrong_message.last_mut().unwrap() ^= 1;
+        assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
+        let mut wrong_signature = instruction.data;
+        wrong_signature[2 + count * 14 + 32] ^= 1;
+        assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
     }
+    assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
+    assert!(packed_ed25519_instruction(&[], &message).is_err());
 }
 
 #[test]
-fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
+fn canonical_page_settlement_fits_with_both_compute_budget_instructions() {
     use solana_sdk::{
         compute_budget::ComputeBudgetInstruction, message::Message, signature::Keypair,
         signer::Signer, transaction::Transaction,
@@ -1145,14 +1122,11 @@ fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
         &message,
     )
     .unwrap();
-    for (page_count, expected_size) in [(3, 1231), (4, 1297)] {
-        let pages: Vec<_> = (0..page_count)
-            .map(|_| (Pubkey::new_unique(), Pubkey::new_unique()))
-            .collect();
-        let finalize = finalize_disputed_bundle_verification_v2(
+    for page_count in 1..=3 {
+        let pages: Vec<_> = (0..page_count).map(|_| Pubkey::new_unique()).collect();
+        let finalize = finalize_bundle_verification_v2(
             crate::ID,
             payer.pubkey(),
-            Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
@@ -1173,10 +1147,7 @@ fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
             Some(&payer.pubkey()),
         ));
         let size = bincode::serialize(&tx).unwrap().len();
-        assert_eq!(size, expected_size);
-        assert_eq!(
-            size <= solana_sdk::packet::PACKET_DATA_SIZE,
-            page_count == 3
-        );
+        println!("{page_count} canonical pages: {size} bytes");
+        assert!(size <= solana_sdk::packet::PACKET_DATA_SIZE);
     }
 }
