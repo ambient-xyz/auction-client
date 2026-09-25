@@ -9,7 +9,6 @@ use solana_sdk::{
 use solana_system_interface::program as system_program;
 use std::net::IpAddr;
 
-#[cfg(feature = "global-config")]
 use super::find_config;
 use super::{
     ToClientPubkey, find_auction, find_bid, find_bundle_escrow_v2, find_bundle_registry,
@@ -91,21 +90,8 @@ pub fn request_job_plan(
     let input_data = input_data_account.unwrap_or_default();
     let system_program = system_program_key();
 
-    #[cfg(feature = "global-config")]
     let config = find_config();
 
-    #[cfg(not(feature = "global-config"))]
-    let account_keys = RequestJobAccountKeys {
-        payer: authority,
-        job_request,
-        registry,
-        input_data,
-        system_program,
-        bundle_auction_account_pairs,
-        last_bundle,
-    };
-
-    #[cfg(feature = "global-config")]
     let account_keys = RequestJobAccountKeys {
         payer: authority,
         job_request,
@@ -130,7 +116,6 @@ pub fn request_job_plan(
         registry: &AccountMeta::new(account_keys.registry, false),
         input_data: &AccountMeta::new(account_keys.input_data, false),
         system_program: &AccountMeta::new_readonly(account_keys.system_program, false),
-        #[cfg(feature = "global-config")]
         config: &AccountMeta::new(account_keys.config, false),
         bundle_auction_account_pairs: bundle_auction_account_pairs.as_slice(),
         last_bundle: &AccountMeta::new(account_keys.last_bundle, false),
@@ -357,7 +342,6 @@ pub fn init_bundle_plan(
     )
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config_plan(
     payer: impl ToClientPubkey,
     args: InitConfigArgs,
@@ -386,7 +370,7 @@ pub fn init_config_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v2_plan(
+pub fn open_bundle_escrow_v5_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
@@ -397,7 +381,9 @@ pub fn open_bundle_escrow_v2_plan(
     total_input_tokens: u64,
     max_output_tokens: u64,
     escrow_lamports: u64,
+    expected_page_count: u8,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    assert!((1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count), "bundle must declare one to three verifier pages");
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
@@ -418,7 +404,7 @@ pub fn open_bundle_escrow_v2_plan(
     (
         Instruction {
             program_id: target_program_id,
-            data: OpenBundleEscrowV2Args {
+            data: OpenBundleEscrowV5Args {
                 bundle_version,
                 _reserved0: [0; 4],
                 reward_tier: u64::from(reward_tier),
@@ -428,6 +414,8 @@ pub fn open_bundle_escrow_v2_plan(
                 total_input_tokens,
                 max_output_tokens,
                 escrow_lamports,
+                expected_page_count,
+                _reserved1: [0; 7],
             }
             .to_bytes(),
             accounts: account_metas.iter_owned().collect::<Vec<_>>(),

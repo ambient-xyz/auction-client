@@ -15,12 +15,11 @@ use solana_vote_interface::program as vote;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 
-#[cfg(feature = "global-config")]
 use super::init_config_plan;
 use super::{
     find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
     find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
-    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v2_plan, place_bid_plan,
+    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v5_plan, place_bid_plan,
     request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
@@ -55,6 +54,7 @@ fn build_post_bundle_result_v2_instruction(
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         config_policy: &AccountMeta::new(config_policy, false),
         bundle_verifier_page: bundle_verifier_page_meta.as_ref(),
+        bundle_verification_dispute: None,
     };
 
     Instruction {
@@ -400,7 +400,6 @@ pub fn init_bundle(
     .0
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     init_config_plan(payer, args).0
 }
@@ -634,7 +633,7 @@ pub fn init_bundle_verifier_page_v2(
         find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index);
     let account_metas = InitBundleVerifierPageV2Accounts {
         payer: &AccountMeta::new(payer, true),
-        bundle_escrow: &AccountMeta::new_readonly(bundle_escrow, false),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         bundle_verifier_page: &AccountMeta::new(bundle_verifier_page, false),
         system_program: &AccountMeta::new_readonly(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
@@ -674,7 +673,7 @@ pub fn init_bundle_dispute_verifier_page_v2(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v2(
+pub fn open_bundle_escrow_v5(
     target_program_id: Pubkey,
     payer: Pubkey,
     bundle_version: u32,
@@ -685,8 +684,9 @@ pub fn open_bundle_escrow_v2(
     total_input_tokens: u64,
     max_output_tokens: u64,
     escrow_lamports: u64,
+    expected_page_count: u8,
 ) -> Instruction {
-    open_bundle_escrow_v2_plan(
+    open_bundle_escrow_v5_plan(
         target_program_id,
         payer,
         bundle_version,
@@ -697,6 +697,7 @@ pub fn open_bundle_escrow_v2(
         total_input_tokens,
         max_output_tokens,
         escrow_lamports,
+        expected_page_count,
     )
     .0
 }
@@ -908,7 +909,7 @@ fn select_bundle_verifiers_v2(
     let account_metas = SelectBundleVerifiersV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         auction_verifiers: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_SYSVAR_ID),
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
             false,
         ),
         slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
@@ -1048,4 +1049,137 @@ pub fn expire_disputed_bundle_escrow_v2(
         data: ExpireBundleEscrowV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
+}
+
+pub fn close_bundle_verifier_page_v5(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    funder: Pubkey,
+    page_index: u16,
+    disputed: bool,
+) -> Instruction {
+    let page = if disputed {
+        find_bundle_dispute_verifier_page_v2(target_program_id, bundle_escrow, page_index)
+    } else {
+        find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index)
+    };
+    Instruction {
+        program_id: target_program_id,
+        accounts: vec![
+            AccountMeta::new(funder, false),
+            AccountMeta::new(bundle_escrow, false),
+            AccountMeta::new(page, false),
+        ],
+        data: ambient_auction_api::CloseBundleVerifierPageV5Args {
+            page_index,
+            disputed: u8::from(disputed),
+            _reserved: [0; 5],
+        }
+        .to_bytes(),
+    }
+}
+
+pub fn authorize_bundle_dispute_evidence_v5(
+    target_program_id: Pubkey,
+    submitter: Pubkey,
+    bundle_escrow: Pubkey,
+    verification_hash: [u8; 32],
+    page_hashes: [[u8; 32]; ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES as usize],
+    quorum_verifier_bitmap: u8,
+) -> Instruction {
+    Instruction {
+        program_id: target_program_id,
+        accounts: vec![
+            AccountMeta::new_readonly(submitter, true),
+            AccountMeta::new_readonly(bundle_escrow, false),
+            AccountMeta::new(
+                find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+                false,
+            ),
+            AccountMeta::new_readonly(solana_sdk::sysvar::instructions::ID, false),
+        ],
+        data: AuthorizeBundleDisputeEvidenceV5Args {
+            verification_hash,
+            page_hashes,
+            quorum_verifier_bitmap,
+            _reserved: [0; 7],
+        }
+        .to_bytes(),
+    }
+}
+
+/// Hash the evidence bytes, excluding the page's funder and lifecycle metadata.
+pub fn bundle_dispute_evidence_page_hash(page_bytes: &[u8]) -> Result<[u8; 32], &'static str> {
+    let evidence = ambient_auction_api::bundle_verifier_page_hash_bytes(page_bytes)
+        .ok_or("invalid verifier page layout")?;
+    Ok(solana_sdk::hash::hash(evidence).to_bytes())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn post_bundle_dispute_result_v2(
+    target_program_id: Pubkey,
+    submitter: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verifier_page: Pubkey,
+    result_hash: [u8; 32],
+    posted_output_tokens: u64,
+    page_index: u16,
+    page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
+) -> Instruction {
+    let mut instruction = post_bundle_result_v2(
+        target_program_id,
+        submitter,
+        bundle_escrow,
+        bundle_verifier_page,
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entries,
+    );
+    instruction.accounts.push(AccountMeta::new_readonly(
+        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+        false,
+    ));
+    instruction
+}
+
+/// Verify one or two signatures over the same message in a single precompile instruction.
+pub fn packed_ed25519_instruction(
+    signatures: &[(Pubkey, solana_sdk::signature::Signature)],
+    message: &[u8],
+) -> Result<Instruction, &'static str> {
+    if !(1..=2).contains(&signatures.len()) || message.len() > u16::MAX as usize {
+        return Err("invalid Ed25519 signature count or message length");
+    }
+    if signatures.len() == 2 && signatures[0].0 == signatures[1].0 {
+        return Err("duplicate Ed25519 signer");
+    }
+    let data_start = 2 + signatures.len() * 14;
+    let message_offset = data_start + signatures.len() * 96;
+    let mut data = Vec::with_capacity(message_offset + message.len());
+    data.extend_from_slice(&[signatures.len() as u8, 0]);
+    for index in 0..signatures.len() {
+        let key_offset = data_start + index * 96;
+        for value in [
+            (key_offset + 32) as u16,
+            u16::MAX,
+            key_offset as u16,
+            u16::MAX,
+            message_offset as u16,
+            message.len() as u16,
+            u16::MAX,
+        ] {
+            data.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    for (key, signature) in signatures {
+        data.extend_from_slice(key.as_ref());
+        data.extend_from_slice(signature.as_ref());
+    }
+    data.extend_from_slice(message);
+    Ok(Instruction {
+        program_id: solana_sdk::ed25519_program::id(),
+        accounts: vec![],
+        data,
+    })
 }
