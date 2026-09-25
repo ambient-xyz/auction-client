@@ -988,7 +988,6 @@ pub fn expire_bundle_escrow_v2(
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
         config_policy: &AccountMeta::new(config_policy, false),
-        remaining_accounts: &[],
     };
 
     Instruction {
