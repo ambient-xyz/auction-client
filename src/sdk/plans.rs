@@ -9,7 +9,6 @@ use solana_sdk::{
 use solana_system_interface::program as system_program;
 use std::net::IpAddr;
 
-#[cfg(feature = "global-config")]
 use super::find_config;
 use super::{
     ToClientPubkey, find_auction, find_bid, find_bundle_escrow_v2, find_bundle_registry,
@@ -91,21 +90,8 @@ pub fn request_job_plan(
     let input_data = input_data_account.unwrap_or_default();
     let system_program = system_program_key();
 
-    #[cfg(feature = "global-config")]
     let config = find_config();
 
-    #[cfg(not(feature = "global-config"))]
-    let account_keys = RequestJobAccountKeys {
-        payer: authority,
-        job_request,
-        registry,
-        input_data,
-        system_program,
-        bundle_auction_account_pairs,
-        last_bundle,
-    };
-
-    #[cfg(feature = "global-config")]
     let account_keys = RequestJobAccountKeys {
         payer: authority,
         job_request,
@@ -130,7 +116,6 @@ pub fn request_job_plan(
         registry: &AccountMeta::new(account_keys.registry, false),
         input_data: &AccountMeta::new(account_keys.input_data, false),
         system_program: &AccountMeta::new_readonly(account_keys.system_program, false),
-        #[cfg(feature = "global-config")]
         config: &AccountMeta::new(account_keys.config, false),
         bundle_auction_account_pairs: bundle_auction_account_pairs.as_slice(),
         last_bundle: &AccountMeta::new(account_keys.last_bundle, false),
@@ -357,7 +342,6 @@ pub fn init_bundle_plan(
     )
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config_plan(
     payer: impl ToClientPubkey,
     args: InitConfigArgs,

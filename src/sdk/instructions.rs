@@ -8,11 +8,8 @@ use crate::ID as program_id;
 use ambient_auction_api::state::{
     ConfigPolicyV2, ConfigPolicyV2Flags, RequestTier, RequestTierConfigV2,
 };
-use ambient_auction_api::{
-    BundleVerificationDisputeV2Kind, PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*,
-};
+use ambient_auction_api::{PUBKEY_BYTES, REQUEST_BUNDLE_SEED, instruction::*};
 use solana_sdk::{
-    incinerator,
     instruction::{AccountMeta, Instruction},
     pubkey::{MAX_SEED_LEN, Pubkey},
 };
@@ -21,11 +18,9 @@ use solana_vote_interface::program as vote;
 use std::net::IpAddr;
 use std::num::NonZeroU64;
 
-#[cfg(feature = "global-config")]
 use super::init_config_plan;
 use super::{
-    find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
-    find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
+    find_auction, find_bundle_registry, find_bundle_verifier_page_v2, find_child_bundle,
     find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v5_plan, place_bid_plan,
     request_job_plan, reveal_bid_plan, submit_job_plan,
 };
@@ -413,7 +408,6 @@ pub fn init_bundle(
     .0
 }
 
-#[cfg(feature = "global-config")]
 pub fn init_config(payer: Pubkey, args: InitConfigArgs) -> Instruction {
     init_config_plan(payer, args).0
 }
@@ -449,11 +443,7 @@ pub fn init_config_policy_v2(
             v2_verifiers_per_auction: policy.v2_verifiers_per_auction,
             v2_verifier_quorum: policy.v2_verifier_quorum,
             _reserved0: [0; 6],
-            missed_verification_dispute_window_slots: policy
-                .missed_verification_dispute_window_slots,
-            dispute_verification_window_slots: policy.dispute_verification_window_slots,
-            paid_verification_dispute_window_slots: policy.paid_verification_dispute_window_slots,
-            paid_verification_dispute_bond_lamports: policy.paid_verification_dispute_bond_lamports,
+
             tier_configs: policy.tier_configs,
         }
         .to_bytes(),
@@ -468,14 +458,11 @@ fn empty_set_config_policy_v2_args(patch_kind: ConfigPolicyV2PatchKind) -> SetCo
         authority_index: 0,
         v2_verifiers_per_auction: 0,
         v2_verifier_quorum: 0,
-        _reserved0: [0; 3],
+        small_credit_enabled: 0,
+        _reserved0: [0; 2],
         tier: 0,
         policy_flags: ConfigPolicyV2Flags::empty(),
         max_auction_credits_per_update: 0,
-        missed_verification_dispute_window_slots: 0,
-        dispute_verification_window_slots: 0,
-        paid_verification_dispute_window_slots: 0,
-        paid_verification_dispute_bond_lamports: 0,
         authority: [0; 32].into(),
         tier_config: RequestTierConfigV2 {
             bid_reveal_duration: 0,
@@ -497,7 +484,7 @@ fn empty_set_config_policy_v2_args(patch_kind: ConfigPolicyV2PatchKind) -> SetCo
 fn set_config_policy_v2_with_args(
     target_program_id: Pubkey,
     authority: Pubkey,
-    args: impl InstructionBytes,
+    args: SetConfigPolicyV2Args,
 ) -> Instruction {
     let config_policy = find_config_policy_v2(target_program_id);
 
@@ -615,47 +602,6 @@ pub fn set_config_policy_v2_max_auction_credits_per_update(
     )
 }
 
-pub fn set_config_policy_v2_dispute_settings(
-    target_program_id: Pubkey,
-    authority: Pubkey,
-    missed_verification_dispute_window_slots: u64,
-    dispute_verification_window_slots: u64,
-    paid_verification_dispute_window_slots: u64,
-    paid_verification_dispute_bond_lamports: u64,
-) -> Instruction {
-    set_config_policy_v2_with_args(
-        target_program_id,
-        authority,
-        SetConfigPolicyV2Args {
-            missed_verification_dispute_window_slots,
-            dispute_verification_window_slots,
-            paid_verification_dispute_window_slots,
-            paid_verification_dispute_bond_lamports,
-            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::DISPUTE_SETTINGS)
-        },
-    )
-}
-
-fn empty_set_config_policy_small_v3_args(
-    patch_kind: ConfigPolicyV2PatchKind,
-) -> SetConfigPolicySmallV3Args {
-    let empty = empty_set_config_policy_v2_args(patch_kind);
-    SetConfigPolicySmallV3Args {
-        patch_kind,
-        authority_kind: empty.authority_kind,
-        authority_index: 0,
-        v2_verifiers_per_auction: 0,
-        v2_verifier_quorum: 0,
-        small_credit_enabled: 0,
-        _reserved0: [0; 2],
-        tier: 0,
-        policy_flags: ConfigPolicyV2Flags::empty(),
-        max_auction_credits_per_update: 0,
-        authority: [0; 32].into(),
-        tier_config: empty.tier_config,
-    }
-}
-
 pub fn set_config_policy_v2_small_credit_settings(
     target_program_id: Pubkey,
     authority: Pubkey,
@@ -665,10 +611,10 @@ pub fn set_config_policy_v2_small_credit_settings(
     set_config_policy_v2_with_args(
         target_program_id,
         authority,
-        SetConfigPolicySmallV3Args {
+        SetConfigPolicyV2Args {
             small_credit_enabled: u8::from(enabled),
             authority: mint.to_bytes().into(),
-            ..empty_set_config_policy_small_v3_args(ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS)
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS)
         },
     )
 }
@@ -681,11 +627,9 @@ pub fn set_config_policy_v2_small_credit_slash_authority(
     set_config_policy_v2_with_args(
         target_program_id,
         authority,
-        SetConfigPolicySmallV3Args {
+        SetConfigPolicyV2Args {
             authority: slash_authority.to_bytes().into(),
-            ..empty_set_config_policy_small_v3_args(
-                ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY,
-            )
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY)
         },
     )
 }
@@ -744,25 +688,6 @@ pub fn init_bundle_verifier_page_v2(
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
-}
-
-pub fn init_bundle_dispute_verifier_page_v2(
-    target_program_id: Pubkey,
-    payer: Pubkey,
-    bundle_escrow: Pubkey,
-    page_index: u16,
-    bundle_verifier_page_lamports: u64,
-) -> Instruction {
-    let mut instruction = init_bundle_verifier_page_v2(
-        target_program_id,
-        payer,
-        bundle_escrow,
-        page_index,
-        bundle_verifier_page_lamports,
-    );
-    instruction.accounts[2].pubkey =
-        find_bundle_dispute_verifier_page_v2(target_program_id, bundle_escrow, page_index);
-    instruction
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -982,97 +907,12 @@ pub fn finalize_bundle_verification_v2_with_remaining_accounts(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn finalize_disputed_bundle_verification_v2(
-    target_program_id: Pubkey,
-    coordinator: Pubkey,
-    bundle_escrow: Pubkey,
-    winner_node: Pubkey,
-    requester_refund_recipient: Pubkey,
-    bond_refund_recipient: Pubkey,
-    verification_hash: [u8; 32],
-    accepted_output_tokens: u64,
-    winner_payout_lamports: u64,
-    verdict: VerificationVerdictV2,
-    quorum_verifier_bitmap: u8,
-    bundle_verifier_page_pairs: &[(Pubkey, Pubkey)],
-) -> Instruction {
-    let bundle_verification_dispute =
-        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
-    let mut trailing_accounts = Vec::with_capacity(3 + bundle_verifier_page_pairs.len() * 2);
-    trailing_accounts.push(bundle_verification_dispute);
-    trailing_accounts.push(bond_refund_recipient);
-    trailing_accounts.push(incinerator::ID);
-    for (staging_page, canonical_page) in bundle_verifier_page_pairs {
-        trailing_accounts.push(*staging_page);
-        trailing_accounts.push(*canonical_page);
-    }
-    let mut instruction = finalize_bundle_verification_v2(
-        target_program_id,
-        coordinator,
-        bundle_escrow,
-        winner_node,
-        requester_refund_recipient,
-        verification_hash,
-        accepted_output_tokens,
-        winner_payout_lamports,
-        verdict,
-        quorum_verifier_bitmap,
-        &trailing_accounts,
-    );
-    let first_staging_account = instruction.accounts.len() - trailing_accounts.len() + 3;
-    for staging_account in instruction.accounts[first_staging_account..]
-        .iter_mut()
-        .step_by(2)
-    {
-        staging_account.is_writable = false;
-    }
-    instruction
-}
-
-pub fn dispute_bundle_verification_v2(
-    target_program_id: Pubkey,
-    dispute_payer: Pubkey,
-    bundle_escrow: Pubkey,
-    bond_refund_recipient: Pubkey,
-    kind: BundleVerificationDisputeV2Kind,
-) -> Instruction {
-    let bundle_verification_dispute =
-        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
-    let config_policy = find_config_policy_v2(target_program_id);
-    let account_metas = DisputeBundleVerificationV2Accounts {
-        dispute_payer: &AccountMeta::new(dispute_payer, true),
-        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
-        bundle_verification_dispute: &AccountMeta::new(bundle_verification_dispute, false),
-        bond_refund_recipient: &AccountMeta::new(bond_refund_recipient, false),
-        config_policy: &AccountMeta::new(config_policy, false),
-        system_program: &AccountMeta::new_readonly(
-            Pubkey::new_from_array(system_program::ID.to_bytes()),
-            false,
-        ),
-    };
-
-    Instruction {
-        program_id: target_program_id,
-        data: DisputeBundleVerificationV2Args {
-            kind,
-            _reserved: [0; 7],
-        }
-        .to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
-}
-
-fn select_bundle_verifiers_v2(
+pub fn select_initial_bundle_verifiers_v2(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
-    bundle_verification_dispute: Option<Pubkey>,
 ) -> Instruction {
-    let bundle_verification_dispute =
-        bundle_verification_dispute.map(|key| AccountMeta::new(key, false));
     let account_metas = SelectBundleVerifiersV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
-        bundle_verification_dispute: bundle_verification_dispute.as_ref(),
     };
 
     Instruction {
@@ -1080,27 +920,6 @@ fn select_bundle_verifiers_v2(
         data: SelectBundleVerifiersV2Args {}.to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
-}
-
-pub fn select_initial_bundle_verifiers_v2(
-    target_program_id: Pubkey,
-    bundle_escrow: Pubkey,
-) -> Instruction {
-    select_bundle_verifiers_v2(target_program_id, bundle_escrow, None)
-}
-
-pub fn select_replacement_bundle_verifiers_v2(
-    target_program_id: Pubkey,
-    bundle_escrow: Pubkey,
-) -> Instruction {
-    select_bundle_verifiers_v2(
-        target_program_id,
-        bundle_escrow,
-        Some(find_bundle_verification_dispute_v2(
-            target_program_id,
-            bundle_escrow,
-        )),
-    )
 }
 
 pub fn claim_winner_lstake_v2(
@@ -1179,49 +998,13 @@ pub fn expire_bundle_escrow_v2(
     }
 }
 
-pub fn expire_disputed_bundle_escrow_v2(
-    target_program_id: Pubkey,
-    bundle_escrow: Pubkey,
-    requester_refund_recipient: Pubkey,
-    bond_refund_recipient: Pubkey,
-    winner_node: Option<Pubkey>,
-) -> Instruction {
-    let config_policy = find_config_policy_v2(target_program_id);
-    let bundle_verification_dispute =
-        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
-    let mut remaining_accounts = vec![
-        AccountMeta::new(bundle_verification_dispute, false),
-        AccountMeta::new(bond_refund_recipient, false),
-    ];
-    if let Some(winner_node) = winner_node {
-        remaining_accounts.push(AccountMeta::new(winner_node, false));
-    }
-    let account_metas = ExpireBundleEscrowV2Accounts {
-        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
-        requester_refund_recipient: &AccountMeta::new(requester_refund_recipient, false),
-        config_policy: &AccountMeta::new(config_policy, false),
-        remaining_accounts: &remaining_accounts,
-    };
-
-    Instruction {
-        program_id: target_program_id,
-        data: ExpireBundleEscrowV2Args {}.to_bytes(),
-        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
-    }
-}
-
 pub fn close_bundle_verifier_page_v5(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     funder: Pubkey,
     page_index: u16,
-    disputed: bool,
 ) -> Instruction {
-    let page = if disputed {
-        find_bundle_dispute_verifier_page_v2(target_program_id, bundle_escrow, page_index)
-    } else {
-        find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index)
-    };
+    let page = find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index);
     Instruction {
         program_id: target_program_id,
         accounts: vec![
@@ -1229,12 +1012,7 @@ pub fn close_bundle_verifier_page_v5(
             AccountMeta::new(bundle_escrow, false),
             AccountMeta::new(page, false),
         ],
-        data: ambient_auction_api::CloseBundleVerifierPageV5Args {
-            page_index,
-            disputed: u8::from(disputed),
-            _reserved: [0; 5],
-        }
-        .to_bytes(),
+        data: ambient_auction_api::CloseBundleVerifierPageV5Args { page_index }.to_bytes(),
     }
 }
 
