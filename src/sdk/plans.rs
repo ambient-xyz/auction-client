@@ -427,7 +427,7 @@ pub fn open_bundle_escrow_v5_plan(
     )
 }
 
-/// SmallV3 retains its separate historical creation protocol.
+/// Historical SmallV3 creation encoding. The V5 program rejects new V3 auctions.
 #[allow(clippy::too_many_arguments)]
 pub fn open_small_bundle_escrow_v3_plan(
     target_program_id: Pubkey,

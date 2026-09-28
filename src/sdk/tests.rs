@@ -1,12 +1,13 @@
 use super::*;
 use ambient_auction_api::{
-    AuctionInstruction, BUNDLE_ESCROW_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
-    BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, ConfigPolicyV2,
-    ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind, InitBundleVerifierPageV2Args,
-    InitConfigPolicyV2Args, InstructionAccounts, OpenBundleEscrowV5Args, PlaceBidArgs,
-    PostBundleResultV2Args, PostBundleResultV3Args, RequestTier, RequestTierConfigV2,
-    RevealBidArgs, SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs,
-    VerificationVerdictV2, error::AuctionError,
+    AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
+    BUNDLE_VERIFIER_PAGE_V2_SEED, BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED,
+    ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind,
+    InitBundleVerifierPageV2Args, InitConfigPolicyV2Args, InstructionAccounts,
+    OpenBundleEscrowV5Args, PlaceBidArgs, PostBundleResultV2Args, PostBundleResultV3Args,
+    RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicySmallV3Args,
+    SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2,
+    error::AuctionError,
 };
 use solana_sdk::{
     instruction::{AccountMeta, Instruction, InstructionError},
@@ -81,6 +82,22 @@ fn find_bundle_verifier_page_for_program(
     Pubkey::find_program_address(
         &[
             BUNDLE_VERIFIER_PAGE_V2_SEED,
+            bundle_escrow.as_ref(),
+            page_index.to_le_bytes().as_ref(),
+        ],
+        &program_id,
+    )
+    .0
+}
+
+fn find_bundle_dispute_verifier_page_for_program(
+    program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED,
             bundle_escrow.as_ref(),
             page_index.to_le_bytes().as_ref(),
         ],
@@ -301,6 +318,25 @@ fn flexible_key_inputs_resolve_to_same_pubkeys() {
         find_bundle_verifier_page_v2(crate::ID, bundle_escrow, 3),
         find_bundle_verifier_page_v2(crate::ID, &bundle_escrow_bytes, 3)
     );
+    assert_eq!(
+        find_bundle_dispute_verifier_page_v2(crate::ID, bundle_escrow, 3),
+        find_bundle_dispute_verifier_page_v2(crate::ID, &bundle_escrow_bytes, 3)
+    );
+}
+
+#[test]
+fn bundle_dispute_verifier_page_v2_uses_distinct_seed() {
+    let program_id = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+    let page_index = 3;
+    let canonical = find_bundle_verifier_page_v2(program_id, bundle_escrow, page_index);
+    let dispute = find_bundle_dispute_verifier_page_v2(program_id, bundle_escrow, page_index);
+
+    assert_ne!(dispute, canonical);
+    assert_eq!(
+        dispute,
+        find_bundle_dispute_verifier_page_for_program(program_id, bundle_escrow, page_index)
+    );
 }
 
 #[test]
@@ -340,7 +376,32 @@ fn init_bundle_verifier_page_v2_uses_canonical_page_pda_and_encoded_args() {
 }
 
 #[test]
-fn verifier_selection_builder_uses_only_the_escrow() {
+fn init_bundle_dispute_verifier_page_v2_uses_staging_page_pda() {
+    let program_id = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+    let page_index = 7;
+    let lamports = 12_345;
+    let expected_page =
+        find_bundle_dispute_verifier_page_for_program(program_id, bundle_escrow, page_index);
+
+    let instruction = init_bundle_dispute_verifier_page_v2(
+        program_id,
+        payer,
+        bundle_escrow,
+        page_index,
+        lamports,
+    );
+    let args = InitBundleVerifierPageV2Args::try_from(&instruction.data[1..]).unwrap();
+
+    assert_eq!(instruction.accounts[2].pubkey, expected_page);
+    assert!(instruction.accounts[2].is_writable);
+    assert_eq!(args.bundle_verifier_page_lamports, lamports);
+    assert_eq!(args.page_index, page_index);
+}
+
+#[test]
+fn verifier_selection_builders_use_initial_and_replacement_accounts() {
     let program_id = Pubkey::new_unique();
     let bundle_escrow = Pubkey::new_unique();
 
@@ -354,6 +415,91 @@ fn verifier_selection_builder_uses_only_the_escrow() {
     assert_eq!(initial.accounts[0].pubkey, bundle_escrow);
     assert!(initial.accounts[0].is_writable);
     assert!(!initial.accounts[0].is_signer);
+
+    let replacement = select_replacement_bundle_verifiers_v2(program_id, bundle_escrow);
+    assert_eq!(replacement.data, initial.data);
+    assert_eq!(replacement.accounts.len(), 2);
+    assert_eq!(replacement.accounts[0], initial.accounts[0]);
+    assert_eq!(
+        replacement.accounts[1].pubkey,
+        find_bundle_verification_dispute_v2(program_id, bundle_escrow)
+    );
+    assert!(replacement.accounts[1].is_writable);
+    assert!(!replacement.accounts[1].is_signer);
+}
+
+#[test]
+fn disputed_finalize_emits_staging_canonical_pairs_with_exact_access() {
+    let program_id = Pubkey::new_unique();
+    let coordinator = Pubkey::new_unique();
+    let bundle_escrow = Pubkey::new_unique();
+    let winner_node = Pubkey::new_unique();
+    let requester_refund_recipient = Pubkey::new_unique();
+    let bond_refund_recipient = Pubkey::new_unique();
+    let staging0 = Pubkey::new_unique();
+    let canonical0 = Pubkey::new_unique();
+    let staging1 = Pubkey::new_unique();
+    let canonical1 = Pubkey::new_unique();
+    let verification_hash = [9; 32];
+    let pairs = [(staging0, canonical0), (staging1, canonical1)];
+
+    let instruction = finalize_disputed_bundle_verification_v2(
+        program_id,
+        coordinator,
+        bundle_escrow,
+        winner_node,
+        requester_refund_recipient,
+        bond_refund_recipient,
+        verification_hash,
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b101,
+        &pairs,
+    );
+    let ordinary = finalize_bundle_verification_v2(
+        program_id,
+        coordinator,
+        bundle_escrow,
+        winner_node,
+        requester_refund_recipient,
+        verification_hash,
+        29,
+        17,
+        VerificationVerdictV2::Verified,
+        0b101,
+        &[],
+    );
+
+    assert_eq!(instruction.data, ordinary.data);
+    assert_eq!(
+        instruction_pubkeys(&instruction),
+        vec![
+            coordinator,
+            bundle_escrow,
+            winner_node,
+            requester_refund_recipient,
+            solana_sdk::sysvar::instructions::ID,
+            find_config_policy_for_program(program_id),
+            find_bundle_verification_dispute_v2(program_id, bundle_escrow),
+            bond_refund_recipient,
+            solana_sdk::incinerator::ID,
+            staging0,
+            canonical0,
+            staging1,
+            canonical1,
+        ]
+    );
+    assert_eq!(
+        instruction
+            .accounts
+            .iter()
+            .map(|meta| meta.is_writable)
+            .collect::<Vec<_>>(),
+        vec![
+            true, true, true, true, false, true, true, true, true, false, true, false, true
+        ]
+    );
 }
 
 #[test]
@@ -972,19 +1118,19 @@ fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
                 authority,
                 ConfigPolicyV2Flags::from_flag(ConfigPolicyV2Flag::AllowServiceCommitOverride),
             ),
-            161,
+            193,
         ),
         (
             set_config_policy_v2_admin_authority(program_id, authority, 0, replacement_authority),
-            161,
+            193,
         ),
         (
             set_config_policy_v2_service_authority(program_id, authority, 0, replacement_authority),
-            161,
+            193,
         ),
         (
             set_config_policy_v2_verifier_settings(program_id, authority, 2, 1),
-            161,
+            193,
         ),
         (
             set_config_policy_v2_tier_config(
@@ -993,11 +1139,11 @@ fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
                 RequestTier::Small,
                 tier_config,
             ),
-            161,
+            193,
         ),
         (
             set_config_policy_v2_max_auction_credits_per_update(program_id, authority, 10),
-            161,
+            193,
         ),
         (slash_authority.clone(), 161),
         (small_settings.clone(), 161),
@@ -1015,7 +1161,7 @@ fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
         assert_eq!(instruction.accounts[1].pubkey, expected_config_policy);
     }
 
-    let args = SetConfigPolicyV2Args::try_from(&small_settings.data[1..]).unwrap();
+    let args = SetConfigPolicySmallV3Args::try_from(&small_settings.data[1..]).unwrap();
     assert_eq!(
         args.patch_kind,
         ConfigPolicyV2PatchKind::SMALL_CREDIT_SETTINGS
@@ -1026,7 +1172,7 @@ fn set_config_policy_helpers_preserve_v2_and_small_v3_encodings() {
         replacement_authority
     );
 
-    let args = SetConfigPolicyV2Args::try_from(&slash_authority.data[1..]).unwrap();
+    let args = SetConfigPolicySmallV3Args::try_from(&slash_authority.data[1..]).unwrap();
     assert_eq!(
         args.patch_kind,
         ConfigPolicyV2PatchKind::SMALL_CREDIT_SLASH_AUTHORITY
@@ -1087,25 +1233,40 @@ fn slash_small_credits_uses_fixed_accounts_and_exact_payload() {
 fn packed_signatures_verify_with_the_ed25519_precompile() {
     use solana_sdk::{signature::Keypair, signer::Signer};
     let signers = [Keypair::new(), Keypair::new()];
-    let message = [42; 232];
-    let signatures = signers.map(|signer| (signer.pubkey(), signer.sign_message(&message)));
-    let features = solana_sdk::feature_set::FeatureSet::all_enabled();
-    for count in 1..=2 {
-        let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
-        assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
-        let mut wrong_message = instruction.data.clone();
-        *wrong_message.last_mut().unwrap() ^= 1;
-        assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
-        let mut wrong_signature = instruction.data;
-        wrong_signature[2 + count * 14 + 32] ^= 1;
-        assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
+    let messages = [
+        vec![42; 232],
+        ambient_auction_api::BundleDisputeEvidenceV5Message::new(
+            [1; 32],
+            33,
+            109,
+            2,
+            [2; 32],
+            [[3; 32], [4; 32], [0; 32]],
+        )
+        .to_bytes(),
+    ];
+    for message in messages {
+        let signatures = signers
+            .each_ref()
+            .map(|signer| (signer.pubkey(), signer.sign_message(&message)));
+        let features = solana_sdk::feature_set::FeatureSet::all_enabled();
+        for count in 1..=2 {
+            let instruction = packed_ed25519_instruction(&signatures[..count], &message).unwrap();
+            assert!(solana_ed25519_program::verify(&instruction.data, &[], &features).is_ok());
+            let mut wrong_message = instruction.data.clone();
+            *wrong_message.last_mut().unwrap() ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_message, &[], &features).is_err());
+            let mut wrong_signature = instruction.data;
+            wrong_signature[2 + count * 14 + 32] ^= 1;
+            assert!(solana_ed25519_program::verify(&wrong_signature, &[], &features).is_err());
+        }
+        assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
+        assert!(packed_ed25519_instruction(&[], &message).is_err());
     }
-    assert!(packed_ed25519_instruction(&[signatures[0], signatures[0]], &message).is_err());
-    assert!(packed_ed25519_instruction(&[], &message).is_err());
 }
 
 #[test]
-fn canonical_page_settlement_fits_with_both_compute_budget_instructions() {
+fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
     use solana_sdk::{
         compute_budget::ComputeBudgetInstruction, message::Message, signature::Keypair,
         signer::Signer, transaction::Transaction,
@@ -1122,11 +1283,14 @@ fn canonical_page_settlement_fits_with_both_compute_budget_instructions() {
         &message,
     )
     .unwrap();
-    for page_count in 1..=3 {
-        let pages: Vec<_> = (0..page_count).map(|_| Pubkey::new_unique()).collect();
-        let finalize = finalize_bundle_verification_v2(
+    for (page_count, expected_size) in [(3, 1231), (4, 1297)] {
+        let pages: Vec<_> = (0..page_count)
+            .map(|_| (Pubkey::new_unique(), Pubkey::new_unique()))
+            .collect();
+        let finalize = finalize_disputed_bundle_verification_v2(
             crate::ID,
             payer.pubkey(),
+            Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
@@ -1147,7 +1311,50 @@ fn canonical_page_settlement_fits_with_both_compute_budget_instructions() {
             Some(&payer.pubkey()),
         ));
         let size = bincode::serialize(&tx).unwrap().len();
-        println!("{page_count} canonical pages: {size} bytes");
-        assert!(size <= solana_sdk::packet::PACKET_DATA_SIZE);
+        assert_eq!(size, expected_size);
+        assert_eq!(
+            size <= solana_sdk::packet::PACKET_DATA_SIZE,
+            page_count == 3
+        );
     }
+}
+
+#[test]
+fn small_v5_claim_uses_only_fixed_unsigned_accounts() {
+    let program = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let winner = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let instruction = claim_small_credits_v5(program, escrow, winner, mint);
+    let token_program = solana_sdk::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+    let ata = Pubkey::find_program_address(
+        &[winner.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
+    ).0;
+    assert_eq!(instruction.program_id, program);
+    assert_eq!(instruction.data, [29]);
+    assert_eq!(instruction.accounts, [
+        AccountMeta::new(escrow, false),
+        AccountMeta::new_readonly(find_config_policy_v2(program), false),
+        AccountMeta::new(mint, false),
+        AccountMeta::new(ata, false),
+        AccountMeta::new_readonly(token_program, false),
+    ]);
+}
+
+#[test]
+fn small_v5_dispute_post_preserves_input_evidence() {
+    let program = Pubkey::new_unique();
+    let submitter = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let page = Pubkey::new_unique();
+    let instruction = post_small_bundle_dispute_result_v5(
+        program, submitter, escrow, page, [3; 32], 42, 0, &[sample_page_entry()], &[123],
+    );
+    let args = PostBundleResultV3Args::try_from(&instruction.data[1..]).unwrap();
+    assert_eq!(args.input_tokens, [123, 0, 0, 0, 0, 0]);
+    assert_eq!(instruction.accounts.len(), 5);
+    assert_eq!(instruction.accounts[4], AccountMeta::new_readonly(
+        find_bundle_verification_dispute_v2(program, escrow), false,
+    ));
 }
