@@ -900,11 +900,19 @@ pub fn post_small_bundle_dispute_result_v5(
     input_tokens: &[u64],
 ) -> Instruction {
     let mut instruction = post_small_bundle_result_v5(
-        target_program_id, submitter, bundle_escrow, bundle_verifier_page,
-        result_hash, posted_output_tokens, page_index, page_entries, input_tokens,
+        target_program_id,
+        submitter,
+        bundle_escrow,
+        bundle_verifier_page,
+        result_hash,
+        posted_output_tokens,
+        page_index,
+        page_entries,
+        input_tokens,
     );
     instruction.accounts.push(AccountMeta::new_readonly(
-        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow), false,
+        find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+        false,
     ));
     instruction
 }
@@ -1138,7 +1146,8 @@ pub fn claim_small_credits_v5(
     let token_account = Pubkey::find_program_address(
         &[winner_node.as_ref(), token_program.as_ref(), mint.as_ref()],
         &solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
-    ).0;
+    )
+    .0;
     let accounts = ClaimSmallCreditsV5Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),

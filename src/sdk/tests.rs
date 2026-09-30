@@ -1330,16 +1330,20 @@ fn small_v5_claim_uses_only_fixed_unsigned_accounts() {
     let ata = Pubkey::find_program_address(
         &[winner.as_ref(), token_program.as_ref(), mint.as_ref()],
         &solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
-    ).0;
+    )
+    .0;
     assert_eq!(instruction.program_id, program);
     assert_eq!(instruction.data, [29]);
-    assert_eq!(instruction.accounts, [
-        AccountMeta::new(escrow, false),
-        AccountMeta::new_readonly(find_config_policy_v2(program), false),
-        AccountMeta::new(mint, false),
-        AccountMeta::new(ata, false),
-        AccountMeta::new_readonly(token_program, false),
-    ]);
+    assert_eq!(
+        instruction.accounts,
+        [
+            AccountMeta::new(escrow, false),
+            AccountMeta::new_readonly(find_config_policy_v2(program), false),
+            AccountMeta::new(mint, false),
+            AccountMeta::new(ata, false),
+            AccountMeta::new_readonly(token_program, false),
+        ]
+    );
 }
 
 #[test]
@@ -1349,12 +1353,21 @@ fn small_v5_dispute_post_preserves_input_evidence() {
     let escrow = Pubkey::new_unique();
     let page = Pubkey::new_unique();
     let instruction = post_small_bundle_dispute_result_v5(
-        program, submitter, escrow, page, [3; 32], 42, 0, &[sample_page_entry()], &[123],
+        program,
+        submitter,
+        escrow,
+        page,
+        [3; 32],
+        42,
+        0,
+        &[sample_page_entry()],
+        &[123],
     );
     let args = PostBundleResultV3Args::try_from(&instruction.data[1..]).unwrap();
     assert_eq!(args.input_tokens, [123, 0, 0, 0, 0, 0]);
     assert_eq!(instruction.accounts.len(), 5);
-    assert_eq!(instruction.accounts[4], AccountMeta::new_readonly(
-        find_bundle_verification_dispute_v2(program, escrow), false,
-    ));
+    assert_eq!(
+        instruction.accounts[4],
+        AccountMeta::new_readonly(find_bundle_verification_dispute_v2(program, escrow), false,)
+    );
 }
