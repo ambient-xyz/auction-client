@@ -6,8 +6,7 @@ use ambient_auction_api::{
     InitBundleVerifierPageV2Args, InitConfigPolicyV2Args, InstructionAccounts,
     OpenBundleEscrowV5Args, PlaceBidArgs, PostBundleResultV2Args, PostBundleResultV3Args,
     RequestTier, RequestTierConfigV2, RevealBidArgs, SetConfigPolicySmallV3Args,
-    SetConfigPolicyV2Args, SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2,
-    error::AuctionError,
+    SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
 };
 use solana_sdk::{
     instruction::{AccountMeta, Instruction, InstructionError},
