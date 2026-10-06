@@ -852,6 +852,28 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     assert_eq!(small.accounts, instruction.accounts);
     let small_args = PostBundleResultV3Args::try_from(&small.data[1..]).unwrap();
     assert_eq!(small_args.input_tokens, [123, 0, 0, 0, 0, 0]);
+
+    let disputed = post_small_bundle_dispute_result_v5(
+        crate::ID,
+        authority,
+        bundle_escrow,
+        bundle_verifier_page,
+        [8; 32],
+        55,
+        3,
+        &[entry],
+        &[123],
+    );
+    assert_eq!(disputed.data, small.data);
+    assert_eq!(disputed.accounts.len(), 5);
+    assert_eq!(&disputed.accounts[..4], &small.accounts);
+    assert_eq!(
+        disputed.accounts[4],
+        AccountMeta::new_readonly(
+            find_bundle_verification_dispute_v2(crate::ID, bundle_escrow),
+            false,
+        )
+    );
 }
 
 #[test]
@@ -1342,31 +1364,5 @@ fn small_v5_claim_uses_only_fixed_unsigned_accounts() {
             AccountMeta::new(ata, false),
             AccountMeta::new_readonly(token_program, false),
         ]
-    );
-}
-
-#[test]
-fn small_v5_dispute_post_preserves_input_evidence() {
-    let program = Pubkey::new_unique();
-    let submitter = Pubkey::new_unique();
-    let escrow = Pubkey::new_unique();
-    let page = Pubkey::new_unique();
-    let instruction = post_small_bundle_dispute_result_v5(
-        program,
-        submitter,
-        escrow,
-        page,
-        [3; 32],
-        42,
-        0,
-        &[sample_page_entry()],
-        &[123],
-    );
-    let args = PostBundleResultV3Args::try_from(&instruction.data[1..]).unwrap();
-    assert_eq!(args.input_tokens, [123, 0, 0, 0, 0, 0]);
-    assert_eq!(instruction.accounts.len(), 5);
-    assert_eq!(
-        instruction.accounts[4],
-        AccountMeta::new_readonly(find_bundle_verification_dispute_v2(program, escrow), false,)
     );
 }
