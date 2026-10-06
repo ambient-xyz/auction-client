@@ -1,7 +1,7 @@
 use crate::ID as program_id;
 use ambient_auction_api::state::RequestTier;
 use ambient_auction_api::{
-    BundleJobPricingV6, BundlePricingCommitmentV6Message, MaybePubkey, PUBKEY_BYTES, instruction::*,
+    BundleJobPricingV4, BundlePricingCommitmentV4Message, MaybePubkey, PUBKEY_BYTES, instruction::*,
 };
 use solana_sdk::hash::hashv;
 use solana_sdk::{
@@ -372,7 +372,7 @@ pub fn init_config_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v5_plan(
+pub fn open_bundle_escrow_v4_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
@@ -409,7 +409,7 @@ pub fn open_bundle_escrow_v5_plan(
     (
         Instruction {
             program_id: target_program_id,
-            data: OpenBundleEscrowV5Args {
+            data: OpenBundleEscrowV4Args {
                 bundle_version,
                 _reserved0: [0; 4],
                 reward_tier: u64::from(reward_tier),
@@ -429,7 +429,7 @@ pub fn open_bundle_escrow_v5_plan(
     )
 }
 
-/// Historical SmallV3 creation encoding. The V5 program rejects new V3 auctions.
+/// Historical SmallV3 creation encoding. The V4 program rejects new V3 auctions.
 #[allow(clippy::too_many_arguments)]
 pub fn open_small_bundle_escrow_v3_plan(
     target_program_id: Pubkey,
@@ -444,7 +444,7 @@ pub fn open_small_bundle_escrow_v3_plan(
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
     let coordinator = coordinator.to_client_pubkey();
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
-    let (mut instruction, keys) = open_bundle_escrow_v5_plan(
+    let (mut instruction, keys) = open_bundle_escrow_v4_plan(
         target_program_id,
         payer,
         bundle_version,
@@ -473,7 +473,7 @@ pub fn open_small_bundle_escrow_v3_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v6_plan(
+pub fn open_priced_bundle_escrow_v4_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
@@ -511,7 +511,7 @@ pub fn open_bundle_escrow_v6_plan(
     (
         Instruction {
             program_id: target_program_id,
-            data: OpenBundleEscrowV6Args {
+            data: OpenPricedBundleEscrowV4Args {
                 bundle_version,
                 _reserved0: [0; 4],
                 reward_tier: u64::from(reward_tier),
@@ -532,10 +532,10 @@ pub fn open_bundle_escrow_v6_plan(
     )
 }
 
-pub fn bundle_pricing_commitment_v6(
+pub fn bundle_pricing_commitment_v4(
     bundle_hash: [u8; 32],
-    entries: &[BundleJobPricingV6],
+    entries: &[BundleJobPricingV4],
 ) -> Option<[u8; 32]> {
-    let message = BundlePricingCommitmentV6Message::new(bundle_hash, entries)?;
+    let message = BundlePricingCommitmentV4Message::new(bundle_hash, entries)?;
     Some(hashv(&[message.as_bytes()]).to_bytes())
 }

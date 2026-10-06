@@ -1,11 +1,11 @@
 use super::*;
 use ambient_auction_api::{
     AuctionInstruction, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
-    BUNDLE_VERIFIER_PAGE_V2_SEED, BundleJobPricingV6, BundlePricingCommitmentV6Message,
+    BUNDLE_VERIFIER_PAGE_V2_SEED, BundleJobPricingV4, BundlePricingCommitmentV4Message,
     BundleVerifierPageV2Entry, CONFIG_POLICY_V2_SEED, CONFIG_SEED, CommitAuctionSettlementV3Args,
     ConfigPolicyV2, ConfigPolicyV2Flag, ConfigPolicyV2Flags, ConfigPolicyV2PatchKind,
     InitBundleVerifierPageV2Args, InitConfigPolicyV2Args, InstructionAccounts,
-    OpenBundleEscrowV5Args, OpenBundleEscrowV6Args, PlaceBidArgs, PostBundlePricingArgs,
+    OpenBundleEscrowV4Args, OpenPricedBundleEscrowV4Args, PlaceBidArgs, PostBundlePricingArgs,
     PostBundleResultV2Args, PostBundleResultV3Args, RequestTier, RequestTierConfigV2,
     RevealBidArgs, SealBundlePricingArgs, SetConfigPolicySmallV3Args, SetConfigPolicyV2Args,
     SlashSmallCreditsArgs, SubmitJobOutputArgs, VerificationVerdictV2, error::AuctionError,
@@ -45,8 +45,8 @@ fn sample_pricing_entry(
     job_byte: u8,
     max_output_tokens: u64,
     price_per_output_token: u64,
-) -> BundleJobPricingV6 {
-    BundleJobPricingV6 {
+) -> BundleJobPricingV4 {
+    BundleJobPricingV4 {
         job_id: [job_byte; 32].into(),
         max_output_tokens,
         price_per_output_token,
@@ -761,13 +761,13 @@ fn submit_job_plan_matches_builder_and_find_helpers() {
 }
 
 #[test]
-fn open_bundle_escrow_v5_plan_matches_builder_and_find_helpers() {
+fn open_bundle_escrow_v4_plan_matches_builder_and_find_helpers() {
     let payer = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();
     let requester_refund_recipient = Pubkey::new_unique();
     let bundle_hash = [4; 32];
 
-    let (planned_instruction, account_keys) = open_bundle_escrow_v5_plan(
+    let (planned_instruction, account_keys) = open_bundle_escrow_v4_plan(
         crate::ID,
         payer.to_bytes(),
         2,
@@ -780,7 +780,7 @@ fn open_bundle_escrow_v5_plan_matches_builder_and_find_helpers() {
         300,
         1,
     );
-    let instruction = open_bundle_escrow_v5(
+    let instruction = open_bundle_escrow_v4(
         crate::ID,
         payer,
         2,
@@ -808,7 +808,7 @@ fn open_bundle_escrow_v5_plan_matches_builder_and_find_helpers() {
         instruction_pubkeys(&instruction)
     );
 
-    let args = OpenBundleEscrowV5Args::try_from(&instruction.data[1..]).unwrap();
+    let args = OpenBundleEscrowV4Args::try_from(&instruction.data[1..]).unwrap();
     assert_eq!(args.reward_tier, u64::from(RequestTier::Pro));
     assert_eq!(args.total_input_tokens, 100);
     assert_eq!(args.max_output_tokens, 200);
@@ -816,31 +816,31 @@ fn open_bundle_escrow_v5_plan_matches_builder_and_find_helpers() {
 }
 
 #[test]
-fn bundle_pricing_commitment_v6_hashes_the_canonical_message() {
+fn bundle_pricing_commitment_v4_hashes_the_canonical_message() {
     let bundle_hash = [4; 32];
     let entries = [
         sample_pricing_entry(1, 100, 7),
         sample_pricing_entry(2, 200, 11),
     ];
-    let message = BundlePricingCommitmentV6Message::new(bundle_hash, &entries).unwrap();
+    let message = BundlePricingCommitmentV4Message::new(bundle_hash, &entries).unwrap();
     let expected = solana_sdk::hash::hashv(&[message.as_bytes()]).to_bytes();
 
     assert_eq!(
-        bundle_pricing_commitment_v6(bundle_hash, &entries),
+        bundle_pricing_commitment_v4(bundle_hash, &entries),
         Some(expected)
     );
-    assert_eq!(bundle_pricing_commitment_v6(bundle_hash, &[]), None);
+    assert_eq!(bundle_pricing_commitment_v4(bundle_hash, &[]), None);
 }
 
 #[test]
-fn open_bundle_escrow_v6_plan_matches_builder_and_encodes_commitment() {
+fn open_priced_bundle_escrow_v4_plan_matches_builder_and_encodes_commitment() {
     let payer = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();
     let requester_refund_recipient = Pubkey::new_unique();
     let bundle_hash = [5; 32];
     let pricing_commitment = [6; 32];
 
-    let (planned_instruction, account_keys) = open_bundle_escrow_v6_plan(
+    let (planned_instruction, account_keys) = open_priced_bundle_escrow_v4_plan(
         crate::ID,
         payer.to_bytes(),
         3,
@@ -854,7 +854,7 @@ fn open_bundle_escrow_v6_plan_matches_builder_and_encodes_commitment() {
         2,
         pricing_commitment,
     );
-    let instruction = open_bundle_escrow_v6(
+    let instruction = open_priced_bundle_escrow_v4(
         crate::ID,
         payer,
         3,
@@ -872,7 +872,7 @@ fn open_bundle_escrow_v6_plan_matches_builder_and_encodes_commitment() {
     assert_eq!(planned_instruction, instruction);
     assert_eq!(
         instruction.data[0],
-        AuctionInstruction::OpenBundleEscrowV6 as u8
+        AuctionInstruction::OpenPricedBundleEscrowV4 as u8
     );
     assert_eq!(
         account_keys.bundle_escrow,
@@ -883,7 +883,7 @@ fn open_bundle_escrow_v6_plan_matches_builder_and_encodes_commitment() {
         instruction_pubkeys(&instruction)
     );
 
-    let args = OpenBundleEscrowV6Args::try_from(&instruction.data[1..]).unwrap();
+    let args = OpenPricedBundleEscrowV4Args::try_from(&instruction.data[1..]).unwrap();
     assert_eq!(args.expected_page_count, 2);
     assert_eq!(args.pricing_commitment, pricing_commitment);
 }
@@ -922,7 +922,7 @@ fn post_bundle_pricing_derives_page_and_zero_pads_entries() {
     assert_eq!(&args.pricing_entries[..2], &entries);
     assert_eq!(
         args.pricing_entries[2..],
-        [BundleJobPricingV6::default();
+        [BundleJobPricingV4::default();
             ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES - 2]
     );
 }
@@ -1069,7 +1069,7 @@ fn post_bundle_result_v2_keeps_page_account_and_encoded_entries() {
     let small_args = PostBundleResultV3Args::try_from(&small.data[1..]).unwrap();
     assert_eq!(small_args.input_tokens, [123, 0, 0, 0, 0, 0]);
 
-    let disputed = post_small_bundle_dispute_result_v5(
+    let disputed = post_small_bundle_dispute_result_v4(
         crate::ID,
         authority,
         bundle_escrow,
@@ -1145,14 +1145,14 @@ fn v2_key_helpers_accept_explicit_program_id() {
 }
 
 #[test]
-fn open_bundle_escrow_v5_plan_supports_explicit_program_id() {
+fn open_bundle_escrow_v4_plan_supports_explicit_program_id() {
     let forced_program_id = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
     let coordinator = Pubkey::new_unique();
     let requester_refund_recipient = Pubkey::new_unique();
     let bundle_hash = [4; 32];
 
-    let (planned_instruction, account_keys) = open_bundle_escrow_v5_plan(
+    let (planned_instruction, account_keys) = open_bundle_escrow_v4_plan(
         forced_program_id,
         payer.to_bytes(),
         2,
@@ -1165,7 +1165,7 @@ fn open_bundle_escrow_v5_plan_supports_explicit_program_id() {
         300,
         1,
     );
-    let instruction = open_bundle_escrow_v5(
+    let instruction = open_bundle_escrow_v4(
         forced_program_id,
         payer,
         2,
@@ -1472,7 +1472,7 @@ fn packed_signatures_verify_with_the_ed25519_precompile() {
     let signers = [Keypair::new(), Keypair::new()];
     let messages = [
         vec![42; 232],
-        ambient_auction_api::BundleDisputeEvidenceV5Message::new(
+        ambient_auction_api::BundleDisputeEvidenceV4Message::new(
             [1; 32],
             33,
             109,
@@ -1557,12 +1557,12 @@ fn three_page_signed_dispute_fits_with_both_compute_budget_instructions() {
 }
 
 #[test]
-fn small_v5_claim_uses_only_fixed_unsigned_accounts() {
+fn small_v4_claim_uses_only_fixed_unsigned_accounts() {
     let program = Pubkey::new_unique();
     let escrow = Pubkey::new_unique();
     let winner = Pubkey::new_unique();
     let mint = Pubkey::new_unique();
-    let instruction = claim_small_credits_v5(program, escrow, winner, mint);
+    let instruction = claim_small_credits_v4(program, escrow, winner, mint);
     let token_program = solana_sdk::pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
     let ata = Pubkey::find_program_address(
         &[winner.as_ref(), token_program.as_ref(), mint.as_ref()],
