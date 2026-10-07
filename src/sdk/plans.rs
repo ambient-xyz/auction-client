@@ -1,6 +1,8 @@
 use crate::ID as program_id;
 use ambient_auction_api::state::RequestTier;
-use ambient_auction_api::{MaybePubkey, PUBKEY_BYTES, instruction::*};
+use ambient_auction_api::{
+    BundleJobPricingV4, BundlePricingCommitmentV4Message, MaybePubkey, PUBKEY_BYTES, instruction::*,
+};
 use solana_sdk::hash::hashv;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -370,7 +372,7 @@ pub fn init_config_plan(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v5_plan(
+pub fn open_bundle_escrow_v4_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
@@ -383,7 +385,10 @@ pub fn open_bundle_escrow_v5_plan(
     escrow_lamports: u64,
     expected_page_count: u8,
 ) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
-    assert!((1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count), "bundle must declare one to three verifier pages");
+    assert!(
+        (1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count),
+        "bundle must declare one to three verifier pages"
+    );
     let payer = payer.to_client_pubkey();
     let coordinator = coordinator.to_client_pubkey();
     let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
@@ -404,7 +409,7 @@ pub fn open_bundle_escrow_v5_plan(
     (
         Instruction {
             program_id: target_program_id,
-            data: OpenBundleEscrowV5Args {
+            data: OpenBundleEscrowV4Args {
                 bundle_version,
                 _reserved0: [0; 4],
                 reward_tier: u64::from(reward_tier),
@@ -422,4 +427,115 @@ pub fn open_bundle_escrow_v5_plan(
         },
         account_keys,
     )
+}
+
+/// Historical SmallV3 creation encoding. The V4 program rejects new V3 auctions.
+#[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v3_plan(
+    target_program_id: Pubkey,
+    payer: impl ToClientPubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: impl ToClientPubkey,
+    requester_refund_recipient: impl ToClientPubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    let coordinator = coordinator.to_client_pubkey();
+    let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
+    let (mut instruction, keys) = open_bundle_escrow_v4_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        RequestTier::Small,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+        1,
+    );
+    instruction.data = OpenBundleEscrowV2Args {
+        bundle_version,
+        _reserved0: [0; 4],
+        reward_tier: u64::from(RequestTier::Small),
+        bundle_hash,
+        coordinator: coordinator.to_bytes(),
+        requester_refund_recipient: requester_refund_recipient.to_bytes(),
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+    }
+    .to_bytes();
+    (instruction, keys)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn open_priced_bundle_escrow_v4_plan(
+    target_program_id: Pubkey,
+    payer: impl ToClientPubkey,
+    bundle_version: u32,
+    reward_tier: RequestTier,
+    bundle_hash: [u8; 32],
+    coordinator: impl ToClientPubkey,
+    requester_refund_recipient: impl ToClientPubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+    expected_page_count: u8,
+    pricing_commitment: [u8; 32],
+) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    assert!(
+        (1..=ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES).contains(&expected_page_count),
+        "bundle must declare one to three verifier pages"
+    );
+    let payer = payer.to_client_pubkey();
+    let coordinator = coordinator.to_client_pubkey();
+    let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
+    let account_keys = OpenBundleEscrowV2AccountKeys {
+        payer,
+        bundle_escrow: find_bundle_escrow_v2(target_program_id, payer, bundle_hash, bundle_version),
+        config_policy: find_config_policy_v2(target_program_id),
+        system_program: system_program_key(),
+    };
+
+    let account_metas = OpenBundleEscrowV2Accounts {
+        payer: &AccountMeta::new(account_keys.payer, true),
+        bundle_escrow: &AccountMeta::new(account_keys.bundle_escrow, false),
+        config_policy: &AccountMeta::new(account_keys.config_policy, false),
+        system_program: &AccountMeta::new_readonly(account_keys.system_program, false),
+    };
+
+    (
+        Instruction {
+            program_id: target_program_id,
+            data: OpenPricedBundleEscrowV4Args {
+                bundle_version,
+                _reserved0: [0; 4],
+                reward_tier: u64::from(reward_tier),
+                bundle_hash,
+                coordinator: coordinator.to_bytes(),
+                requester_refund_recipient: requester_refund_recipient.to_bytes(),
+                total_input_tokens,
+                max_output_tokens,
+                escrow_lamports,
+                expected_page_count,
+                _reserved1: [0; 7],
+                pricing_commitment,
+            }
+            .to_bytes(),
+            accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+        },
+        account_keys,
+    )
+}
+
+pub fn bundle_pricing_commitment_v4(
+    bundle_hash: [u8; 32],
+    entries: &[BundleJobPricingV4],
+) -> Option<[u8; 32]> {
+    let message = BundlePricingCommitmentV4Message::new(bundle_hash, entries)?;
+    Some(hashv(&[message.as_bytes()]).to_bytes())
 }
