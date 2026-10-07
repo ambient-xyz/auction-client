@@ -1,7 +1,7 @@
 //! Builders for newer V2 and SmallV3 programs; the target program must support the
 //! chosen format. Generic policy helpers emit newer V2 payloads (617/193 bytes),
 //! while SmallV3 program revision `4f7756b` expects 585/161 bytes. The Small settings
-//! helpers retain that shorter format. New auctions use V5, including Small.
+//! helpers retain that shorter format. New auctions use V4, including Small.
 //! Existing SmallV3 builders remain available for deployed-format tooling.
 
 use crate::ID as program_id;
@@ -25,8 +25,9 @@ use super::init_config_plan;
 use super::{
     find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
     find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
-    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v5_plan, place_bid_plan,
-    request_job_plan, reveal_bid_plan, submit_job_plan,
+    find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v4_plan,
+    open_priced_bundle_escrow_v4_plan, place_bid_plan, request_job_plan, reveal_bid_plan,
+    submit_job_plan,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -81,6 +82,51 @@ fn build_post_bundle_result_v2_instruction(
     Instruction {
         program_id: target_program_id,
         data,
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+fn build_post_bundle_pricing_instruction(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+    pricing_entries: &[ambient_auction_api::BundleJobPricingV4],
+) -> Instruction {
+    assert!(
+        !pricing_entries.is_empty(),
+        "pricing page must contain at least one entry"
+    );
+    assert!(
+        pricing_entries.len() <= ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES,
+        "pricing entries exceed BundleVerifierPageV2 capacity"
+    );
+    assert!(
+        page_index < u16::from(ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES),
+        "pricing page index exceeds bundle page capacity"
+    );
+
+    let mut padded_pricing_entries = [ambient_auction_api::BundleJobPricingV4::default();
+        ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGE_V2_ENTRIES];
+    padded_pricing_entries[..pricing_entries.len()].copy_from_slice(pricing_entries);
+
+    let bundle_verifier_page =
+        find_bundle_verifier_page_v2(target_program_id, bundle_escrow, page_index);
+    let account_metas = PostBundlePricingAccounts {
+        coordinator: &AccountMeta::new_readonly(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        bundle_verifier_page: &AccountMeta::new(bundle_verifier_page, false),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: PostBundlePricingArgs {
+            page_index,
+            pricing_entry_count: pricing_entries.len() as u8,
+            _reserved: [0; 5],
+            pricing_entries: padded_pricing_entries,
+        }
+        .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
     }
 }
@@ -765,7 +811,7 @@ pub fn init_bundle_dispute_verifier_page_v2(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn open_bundle_escrow_v5(
+pub fn open_bundle_escrow_v4(
     target_program_id: Pubkey,
     payer: Pubkey,
     bundle_version: u32,
@@ -778,7 +824,7 @@ pub fn open_bundle_escrow_v5(
     escrow_lamports: u64,
     expected_page_count: u8,
 ) -> Instruction {
-    open_bundle_escrow_v5_plan(
+    open_bundle_escrow_v4_plan(
         target_program_id,
         payer,
         bundle_version,
@@ -790,6 +836,38 @@ pub fn open_bundle_escrow_v5(
         max_output_tokens,
         escrow_lamports,
         expected_page_count,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn open_priced_bundle_escrow_v4(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_version: u32,
+    reward_tier: RequestTier,
+    bundle_hash: [u8; 32],
+    coordinator: Pubkey,
+    requester_refund_recipient: Pubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+    expected_page_count: u8,
+    pricing_commitment: [u8; 32],
+) -> Instruction {
+    open_priced_bundle_escrow_v4_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        reward_tier,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+        expected_page_count,
+        pricing_commitment,
     )
     .0
 }
@@ -817,6 +895,33 @@ pub fn commit_auction_settlement_v2(
             auction_hash,
             winner_node_pubkey: winner_node_pubkey.to_bytes(),
             clearing_price_per_output_token,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+pub fn commit_auction_settlement_v3(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    winner_vote_account: Pubkey,
+    auction_hash: [u8; 32],
+    winner_node_pubkey: Pubkey,
+) -> Instruction {
+    let config_policy = find_config_policy_v2(target_program_id);
+    let account_metas = CommitAuctionSettlementV3Accounts {
+        coordinator: &AccountMeta::new_readonly(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new_readonly(config_policy, false),
+        winner_vote_account: &AccountMeta::new_readonly(winner_vote_account, false),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: CommitAuctionSettlementV3Args {
+            auction_hash,
+            winner_node_pubkey: winner_node_pubkey.to_bytes(),
         }
         .to_bytes(),
         accounts: account_metas.iter_owned().collect::<Vec<_>>(),
@@ -884,11 +989,11 @@ pub fn post_bundle_result_v3(
     )
 }
 
-/// Small V5 pages use the same input-token payload as SmallV3.
-pub use post_bundle_result_v3 as post_small_bundle_result_v5;
+/// Small V4 pages use the same input-token payload as SmallV3.
+pub use post_bundle_result_v3 as post_small_bundle_result_v4;
 
 #[allow(clippy::too_many_arguments)]
-pub fn post_small_bundle_dispute_result_v5(
+pub fn post_small_bundle_dispute_result_v4(
     target_program_id: Pubkey,
     submitter: Pubkey,
     bundle_escrow: Pubkey,
@@ -899,7 +1004,7 @@ pub fn post_small_bundle_dispute_result_v5(
     page_entries: &[ambient_auction_api::BundleVerifierPageV2Entry],
     input_tokens: &[u64],
 ) -> Instruction {
-    let mut instruction = post_small_bundle_result_v5(
+    let mut instruction = post_small_bundle_result_v4(
         target_program_id,
         submitter,
         bundle_escrow,
@@ -915,6 +1020,55 @@ pub fn post_small_bundle_dispute_result_v5(
         false,
     ));
     instruction
+}
+
+pub fn post_bundle_pricing(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    page_index: u16,
+    pricing_entries: &[ambient_auction_api::BundleJobPricingV4],
+) -> Instruction {
+    build_post_bundle_pricing_instruction(
+        target_program_id,
+        coordinator,
+        bundle_escrow,
+        page_index,
+        pricing_entries,
+    )
+}
+
+pub fn seal_bundle_pricing(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    bundle_verifier_pages: &[Pubkey],
+) -> Instruction {
+    assert!(
+        !bundle_verifier_pages.is_empty(),
+        "bundle pricing must contain at least one verifier page"
+    );
+    assert!(
+        bundle_verifier_pages.len() <= usize::from(ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES),
+        "bundle pricing exceeds verifier page capacity"
+    );
+
+    let page_metas = bundle_verifier_pages
+        .iter()
+        .copied()
+        .map(|page| AccountMeta::new_readonly(page, false))
+        .collect::<Vec<_>>();
+    let account_metas = SealBundlePricingAccounts {
+        coordinator: &AccountMeta::new_readonly(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        bundle_verifier_pages: &page_metas,
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: SealBundlePricingArgs { _reserved: [0; 8] }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
 }
 
 pub fn post_bundle_result_v2_legacy(
@@ -1136,7 +1290,7 @@ pub fn select_replacement_bundle_verifiers_v2(
 }
 
 /// The winner and mint come from the escrow. The program enforces both values.
-pub fn claim_small_credits_v5(
+pub fn claim_small_credits_v4(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     winner_node: Pubkey,
@@ -1148,7 +1302,7 @@ pub fn claim_small_credits_v5(
         &solana_sdk::pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"),
     )
     .0;
-    let accounts = ClaimSmallCreditsV5Accounts {
+    let accounts = ClaimSmallCreditsV4Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
         mint: &AccountMeta::new(mint, false),
@@ -1158,7 +1312,7 @@ pub fn claim_small_credits_v5(
     Instruction {
         program_id: target_program_id,
         accounts: accounts.iter_owned().collect(),
-        data: ClaimSmallCreditsV5Args {}.to_bytes(),
+        data: ClaimSmallCreditsV4Args {}.to_bytes(),
     }
 }
 
@@ -1269,7 +1423,7 @@ pub fn expire_disputed_bundle_escrow_v2(
     }
 }
 
-pub fn close_bundle_verifier_page_v5(
+pub fn close_bundle_verifier_page_v4(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
     funder: Pubkey,
@@ -1288,7 +1442,7 @@ pub fn close_bundle_verifier_page_v5(
             AccountMeta::new(bundle_escrow, false),
             AccountMeta::new(page, false),
         ],
-        data: ambient_auction_api::CloseBundleVerifierPageV5Args {
+        data: ambient_auction_api::CloseBundleVerifierPageV4Args {
             page_index,
             disputed: u8::from(disputed),
             _reserved: [0; 5],
@@ -1297,7 +1451,7 @@ pub fn close_bundle_verifier_page_v5(
     }
 }
 
-pub fn authorize_bundle_dispute_evidence_v5(
+pub fn authorize_bundle_dispute_evidence_v4(
     target_program_id: Pubkey,
     submitter: Pubkey,
     bundle_escrow: Pubkey,
@@ -1316,7 +1470,7 @@ pub fn authorize_bundle_dispute_evidence_v5(
             ),
             AccountMeta::new_readonly(solana_sdk::sysvar::instructions::ID, false),
         ],
-        data: AuthorizeBundleDisputeEvidenceV5Args {
+        data: AuthorizeBundleDisputeEvidenceV4Args {
             verification_hash,
             page_hashes,
             quorum_verifier_bitmap,
