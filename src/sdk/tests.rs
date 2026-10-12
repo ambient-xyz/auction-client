@@ -17,6 +17,31 @@ use solana_sdk::{
 };
 use std::net::{IpAddr, Ipv4Addr};
 
+#[test]
+fn small_v3_settlement_preserves_v2_data_and_adds_readonly_selection_accounts() {
+    let program = Pubkey::new_unique();
+    let coordinator = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let vote = Pubkey::new_unique();
+    let winner = Pubkey::new_unique();
+    let ordinary =
+        commit_auction_settlement_v2(program, coordinator, escrow, vote, [7; 32], winner, 0);
+    let small =
+        commit_auction_settlement_small_v3(program, coordinator, escrow, vote, [7; 32], winner);
+    assert_eq!(small.data, ordinary.data);
+    assert_eq!(small.accounts[..4], ordinary.accounts);
+    assert_eq!(
+        small.accounts[4..],
+        [
+            AccountMeta::new_readonly(
+                Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+                false
+            ),
+            AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+        ]
+    );
+}
+
 fn sample_endpoint() -> (IpAddr, u16) {
     (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000)
 }
