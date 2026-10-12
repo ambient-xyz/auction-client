@@ -558,6 +558,22 @@ fn set_config_policy_v2_with_args(
     }
 }
 
+/// Changes new auction creation only. Patch 8 uses the first reserved payload byte.
+pub fn set_config_policy_v2_account_layout_version(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    version: ambient_auction_api::AccountLayoutVersion,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyV2Args {
+            _reserved0: [version as u8, 0, 0],
+            ..empty_set_config_policy_v2_args(ConfigPolicyV2PatchKind(8))
+        },
+    )
+}
+
 pub fn set_config_policy_v2_flags(
     target_program_id: Pubkey,
     authority: Pubkey,
