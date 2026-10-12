@@ -1582,3 +1582,43 @@ fn small_v4_claim_uses_only_fixed_unsigned_accounts() {
         ]
     );
 }
+
+#[test]
+fn legacy_creation_preserves_instruction_number_accounts_and_payload() {
+    let payer = Pubkey::new_unique();
+    let coordinator = Pubkey::new_unique();
+    let refund = Pubkey::new_unique();
+    for tier in [RequestTier::Standard, RequestTier::Small] {
+        let (instruction, keys) = open_bundle_escrow_v2_plan(
+            crate::ID,
+            payer,
+            7,
+            tier,
+            [3; 32],
+            coordinator,
+            refund,
+            11,
+            13,
+            17,
+        );
+        assert_eq!(instruction.data[0], 12);
+        assert_eq!(instruction.data.len(), 137);
+        assert_eq!(&instruction.data[1..5], &7u32.to_le_bytes());
+        assert_eq!(&instruction.data[9..17], &u64::from(tier).to_le_bytes());
+        assert_eq!(&instruction.data[17..49], &[3; 32]);
+        assert_eq!(&instruction.data[49..81], coordinator.as_ref());
+        assert_eq!(&instruction.data[81..113], refund.as_ref());
+        assert_eq!(&instruction.data[113..121], &11u64.to_le_bytes());
+        assert_eq!(&instruction.data[121..129], &13u64.to_le_bytes());
+        assert_eq!(&instruction.data[129..137], &17u64.to_le_bytes());
+        assert_eq!(
+            instruction.accounts,
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(keys.bundle_escrow, false),
+                AccountMeta::new(find_config_policy_v2(crate::ID), false),
+                AccountMeta::new_readonly(solana_sdk::system_program::ID, false)
+            ]
+        );
+    }
+}

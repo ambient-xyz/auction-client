@@ -429,12 +429,13 @@ pub fn open_bundle_escrow_v4_plan(
     )
 }
 
-/// Historical SmallV3 creation encoding. The V4 program rejects new V3 auctions.
+/// Legacy creation encoding for a program whose creation policy selects V2.
 #[allow(clippy::too_many_arguments)]
-pub fn open_small_bundle_escrow_v3_plan(
+pub fn open_bundle_escrow_v2_plan(
     target_program_id: Pubkey,
     payer: impl ToClientPubkey,
     bundle_version: u32,
+    reward_tier: RequestTier,
     bundle_hash: [u8; 32],
     coordinator: impl ToClientPubkey,
     requester_refund_recipient: impl ToClientPubkey,
@@ -448,7 +449,7 @@ pub fn open_small_bundle_escrow_v3_plan(
         target_program_id,
         payer,
         bundle_version,
-        RequestTier::Small,
+        reward_tier,
         bundle_hash,
         coordinator,
         requester_refund_recipient,
@@ -460,7 +461,7 @@ pub fn open_small_bundle_escrow_v3_plan(
     instruction.data = OpenBundleEscrowV2Args {
         bundle_version,
         _reserved0: [0; 4],
-        reward_tier: u64::from(RequestTier::Small),
+        reward_tier: u64::from(reward_tier),
         bundle_hash,
         coordinator: coordinator.to_bytes(),
         requester_refund_recipient: requester_refund_recipient.to_bytes(),
@@ -470,6 +471,33 @@ pub fn open_small_bundle_escrow_v3_plan(
     }
     .to_bytes();
     (instruction, keys)
+}
+
+/// Historical SmallV3 creation encoding, using the shared V2 instruction.
+#[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v3_plan(
+    target_program_id: Pubkey,
+    payer: impl ToClientPubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: impl ToClientPubkey,
+    requester_refund_recipient: impl ToClientPubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    escrow_lamports: u64,
+) -> (Instruction, OpenBundleEscrowV2AccountKeys<Pubkey>) {
+    open_bundle_escrow_v2_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        RequestTier::Small,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        escrow_lamports,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
