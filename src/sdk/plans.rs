@@ -429,6 +429,51 @@ pub fn open_bundle_escrow_v4_plan(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v4_plan(
+    target_program_id: Pubkey,
+    payer: impl ToClientPubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: impl ToClientPubkey,
+    requester_refund_recipient: impl ToClientPubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    expected_page_count: u8,
+    winner_node_pubkey: impl ToClientPubkey,
+) -> (Instruction, OpenSmallBundleEscrowV4AccountKeys<Pubkey>) {
+    let coordinator = coordinator.to_client_pubkey();
+    let requester_refund_recipient = requester_refund_recipient.to_client_pubkey();
+    let (mut instruction, keys) = open_bundle_escrow_v4_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        RequestTier::Small,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        0,
+        expected_page_count,
+    );
+    instruction.data = OpenSmallBundleEscrowV4Args {
+        bundle_version,
+        _reserved0: [0; 4],
+        bundle_hash,
+        coordinator: coordinator.to_bytes(),
+        requester_refund_recipient: requester_refund_recipient.to_bytes(),
+        total_input_tokens,
+        max_output_tokens,
+        expected_page_count,
+        _reserved1: [0; 7],
+        winner_node_pubkey: winner_node_pubkey.to_client_pubkey().to_bytes(),
+    }
+    .to_bytes();
+    instruction.accounts[2].is_writable = false;
+    (instruction, keys)
+}
+
 /// Historical SmallV3 creation encoding. The V4 program rejects new V3 auctions.
 #[allow(clippy::too_many_arguments)]
 pub fn open_small_bundle_escrow_v3_plan(
