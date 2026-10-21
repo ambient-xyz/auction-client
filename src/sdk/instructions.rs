@@ -26,8 +26,8 @@ use super::{
     find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
     find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
     find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v4_plan,
-    open_priced_bundle_escrow_v4_plan, place_bid_plan, request_job_plan, reveal_bid_plan,
-    submit_job_plan,
+    open_priced_bundle_escrow_v4_plan, open_small_bundle_escrow_v4_plan, place_bid_plan,
+    request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -718,6 +718,56 @@ pub fn set_config_policy_v2_small_credit_settings(
     )
 }
 
+/// Replace the exact-replay policy (patch kind 8). `ReplayPolicyV1::default()` turns exact replay off.
+pub fn set_config_policy_v2_replay_settings(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    replay: ambient_auction_api::ReplayPolicyV1,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyReplayV1Args {
+            patch_kind: ConfigPolicyV2PatchKind::REPLAY_SETTINGS,
+            _reserved0: [0; 7],
+            replay,
+        },
+    )
+}
+
+/// Anchor the SHA-256 of an engine's span commit (exact replay). `engine` is SHA-256 of the engine id; the miner's
+/// node key signs, and `payer` funds the anchor account on the first anchor.
+pub fn anchor_replay_spans_v1(
+    target_program_id: Pubkey,
+    miner_node: Pubkey,
+    payer: Pubkey,
+    engine: [u8; 32],
+    span_id: u64,
+    commit_sha256: [u8; 32],
+) -> Instruction {
+    let replay_anchor = super::find_replay_anchor_v1(target_program_id, miner_node, engine);
+    let account_metas = AnchorReplaySpansV1Accounts {
+        miner_node: &AccountMeta::new_readonly(miner_node, true),
+        payer: &AccountMeta::new(payer, true),
+        replay_anchor: &AccountMeta::new(replay_anchor, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: AnchorReplaySpansV1Args {
+            engine,
+            span_id,
+            commit_sha256,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
 pub fn set_config_policy_v2_small_credit_slash_authority(
     target_program_id: Pubkey,
     authority: Pubkey,
@@ -841,6 +891,34 @@ pub fn open_bundle_escrow_v4(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v4(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: Pubkey,
+    requester_refund_recipient: Pubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    expected_page_count: u8,
+    winner_node_pubkey: Pubkey,
+) -> Instruction {
+    open_small_bundle_escrow_v4_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        expected_page_count,
+        winner_node_pubkey,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn open_priced_bundle_escrow_v4(
     target_program_id: Pubkey,
     payer: Pubkey,
@@ -870,6 +948,24 @@ pub fn open_priced_bundle_escrow_v4(
         pricing_commitment,
     )
     .0
+}
+
+pub fn commit_small_auction_settlement_v4(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    auction_hash: [u8; 32],
+) -> Instruction {
+    let account_metas = CommitSmallAuctionSettlementV4Accounts {
+        coordinator: &AccountMeta::new_readonly(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: CommitSmallAuctionSettlementV4Args { auction_hash }.to_bytes(),
+        accounts: account_metas.iter_owned().collect(),
+    }
 }
 
 pub fn commit_auction_settlement_v2(
@@ -1320,6 +1416,115 @@ pub fn select_replacement_bundle_verifiers_v2(
             bundle_escrow,
         )),
     )
+}
+
+/// Verifier selection for an exact-replay escrow: the draw of `select_*_bundle_verifiers_v2`, restricted to the
+/// members of the policy's replay class. Pass the dispute for a replacement draw.
+pub fn select_replay_verifiers_v1(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    class_id: [u8; 32],
+    replacement: bool,
+) -> Instruction {
+    let dispute = replacement.then(|| {
+        AccountMeta::new(
+            find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+            false,
+        )
+    });
+    let account_metas = SelectReplayVerifiersV1Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        auction_verifiers: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+            false,
+        ),
+        slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+        replay_class: &AccountMeta::new_readonly(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+        bundle_verification_dispute: dispute.as_ref(),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: SelectReplayVerifiersV1Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// A node joins the policy's replay class; `payer` funds the class account on the first join.
+pub fn join_replay_class_v1(
+    target_program_id: Pubkey,
+    node: Pubkey,
+    payer: Pubkey,
+    class_id: [u8; 32],
+) -> Instruction {
+    let account_metas = JoinReplayClassV1Accounts {
+        node: &AccountMeta::new_readonly(node, true),
+        payer: &AccountMeta::new(payer, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: JoinReplayClassV1Args { class_id }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// A member leaves its replay class.
+pub fn leave_replay_class_v1(
+    target_program_id: Pubkey,
+    node: Pubkey,
+    class_id: [u8; 32],
+) -> Instruction {
+    let account_metas = LeaveReplayClassV1Accounts {
+        node: &AccountMeta::new_readonly(node, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: LeaveReplayClassV1Args { class_id }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// An admin removes a member from a replay class.
+pub fn remove_replay_class_member_v1(
+    target_program_id: Pubkey,
+    admin: Pubkey,
+    class_id: [u8; 32],
+    member: Pubkey,
+) -> Instruction {
+    let account_metas = RemoveReplayClassMemberV1Accounts {
+        admin: &AccountMeta::new_readonly(admin, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: RemoveReplayClassMemberV1Args {
+            class_id,
+            member: member.to_bytes().into(),
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
 }
 
 /// The winner and mint come from the escrow. The program enforces both values.
