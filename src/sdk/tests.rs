@@ -1584,6 +1584,79 @@ fn small_v4_claim_uses_only_fixed_unsigned_accounts() {
 }
 
 #[test]
+fn replay_anchor_builder_uses_the_engine_pda_and_exact_access() {
+    let program = Pubkey::new_unique();
+    let miner = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let engine = [4; 32];
+    let instruction = anchor_replay_spans_v1(program, miner, payer, engine, 17, [9; 32]);
+    let anchor = Pubkey::find_program_address(
+        &[
+            ambient_auction_api::REPLAY_ANCHOR_V1_SEED,
+            miner.as_ref(),
+            engine.as_ref(),
+        ],
+        &program,
+    )
+    .0;
+    assert_eq!(anchor, find_replay_anchor_v1(program, miner, engine));
+    assert_ne!(anchor, find_replay_anchor_v1(program, miner, [5; 32]));
+    assert_eq!(instruction.program_id, program);
+    assert_eq!(
+        instruction.accounts,
+        [
+            AccountMeta::new_readonly(miner, true),
+            AccountMeta::new(payer, true),
+            AccountMeta::new(anchor, false),
+            AccountMeta::new_readonly(
+                Pubkey::new_from_array(solana_system_interface::program::ID.to_bytes()),
+                false
+            ),
+        ]
+    );
+    assert_eq!(
+        instruction.data[0],
+        AuctionInstruction::AnchorReplaySpansV1 as u8
+    );
+    let args =
+        ambient_auction_api::AnchorReplaySpansV1Args::try_from(&instruction.data[1..]).unwrap();
+    assert_eq!(args.engine, engine);
+    assert_eq!(args.span_id, 17);
+    assert_eq!(args.commit_sha256, [9; 32]);
+}
+
+#[test]
+fn replay_settings_builder_sends_the_104_byte_payload() {
+    let program = Pubkey::new_unique();
+    let admin = Pubkey::new_unique();
+    let replay = ambient_auction_api::ReplayPolicyV1 {
+        class_id: [3; 32],
+        version: ambient_auction_api::REPLAY_POLICY_V1_VERSION,
+        tier_mask: ambient_auction_api::tier_bit(RequestTier::Large),
+        arbiters: 3,
+        hold_slots: 9_000,
+        ..Default::default()
+    };
+    let instruction = set_config_policy_v2_replay_settings(program, admin, replay);
+    assert_eq!(instruction.data.len(), 1 + 104);
+    assert_eq!(
+        instruction.data[0],
+        AuctionInstruction::SetConfigPolicyV2 as u8
+    );
+    let args =
+        ambient_auction_api::SetConfigPolicyReplayV1Args::try_from(&instruction.data[1..]).unwrap();
+    assert_eq!(args.patch_kind, ConfigPolicyV2PatchKind::REPLAY_SETTINGS);
+    assert_eq!(args.replay, replay);
+    assert_eq!(
+        instruction.accounts,
+        [
+            AccountMeta::new(admin, true),
+            AccountMeta::new(find_config_policy_v2(program), false),
+        ]
+    );
+}
+
+#[test]
 fn small_v4_builders_store_the_winner_only_at_open() {
     let program = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
