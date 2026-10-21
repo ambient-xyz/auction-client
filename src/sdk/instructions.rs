@@ -1501,6 +1501,59 @@ pub fn close_bundle_verifier_page_v4(
     }
 }
 
+/// Close a settled V4 escrow and return its rent to `payer`, the account that opened and funded it (the escrow PDA is
+/// derived from it). The payer signs. The program refuses unless the escrow is finalized or expired, past its claim
+/// deadline, has no verifier page left and holds no lamports beyond its rent-exempt minimum.
+/// [`close_settled_bundle_escrow_v4`] also closes the pages, in the same transaction.
+pub fn close_bundle_escrow_v4(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_escrow: Pubkey,
+) -> Instruction {
+    let account_metas = CloseBundleEscrowV4Accounts {
+        payer: &AccountMeta::new(payer, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: CloseBundleEscrowV4Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// Instructions that release a settled V4 escrow in one transaction: `CloseBundleVerifierPageV4` for every page still
+/// set in the escrow's `allocated_page_bitmap` (bits 0..3 are canonical pages, bits 3..6 dispute staging pages; each
+/// page's rent goes to `page_funder`, which must be the funder recorded in the page), then `CloseBundleEscrowV4`.
+pub fn close_settled_bundle_escrow_v4(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_escrow: Pubkey,
+    page_funder: Pubkey,
+    allocated_page_bitmap: u8,
+) -> Vec<Instruction> {
+    let pages = u16::from(ambient_auction_api::MAX_BUNDLE_VERIFIER_PAGES);
+    let mut instructions = Vec::new();
+    for bit in 0..2 * pages {
+        if allocated_page_bitmap & (1u8 << bit) == 0 {
+            continue;
+        }
+        instructions.push(close_bundle_verifier_page_v4(
+            target_program_id,
+            bundle_escrow,
+            page_funder,
+            bit % pages,
+            bit >= pages,
+        ));
+    }
+    instructions.push(close_bundle_escrow_v4(
+        target_program_id,
+        payer,
+        bundle_escrow,
+    ));
+    instructions
+}
+
 pub fn authorize_bundle_dispute_evidence_v4(
     target_program_id: Pubkey,
     submitter: Pubkey,

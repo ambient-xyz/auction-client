@@ -1655,3 +1655,54 @@ fn replay_settings_builder_sends_the_104_byte_payload() {
         ]
     );
 }
+
+#[test]
+fn close_escrow_builder_has_the_signing_payer_then_the_escrow() {
+    let program = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let escrow = find_bundle_escrow_v2(program, payer, [7; 32], 1);
+    let instruction = close_bundle_escrow_v4(program, payer, escrow);
+    assert_eq!(instruction.program_id, program);
+    assert_eq!(
+        instruction.accounts,
+        [
+            AccountMeta::new(payer, true),
+            AccountMeta::new(escrow, false)
+        ]
+    );
+    assert_eq!(
+        instruction.data,
+        [AuctionInstruction::CloseBundleEscrowV4 as u8]
+    );
+    assert_eq!(instruction.data, [39]);
+}
+
+#[test]
+fn close_settled_escrow_closes_every_allocated_page_first() {
+    let program = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let funder = Pubkey::new_unique();
+    let escrow = find_bundle_escrow_v2(program, payer, [7; 32], 1);
+
+    // Nothing allocated: only the escrow close.
+    assert_eq!(
+        close_settled_bundle_escrow_v4(program, payer, escrow, funder, 0),
+        [close_bundle_escrow_v4(program, payer, escrow)]
+    );
+
+    // Canonical pages 0 and 2 and dispute page 1, in bit order, then the escrow.
+    let instructions = close_settled_bundle_escrow_v4(program, payer, escrow, funder, 0b010101);
+    assert_eq!(
+        instructions,
+        [
+            close_bundle_verifier_page_v4(program, escrow, funder, 0, false),
+            close_bundle_verifier_page_v4(program, escrow, funder, 2, false),
+            close_bundle_verifier_page_v4(program, escrow, funder, 1, true),
+            close_bundle_escrow_v4(program, payer, escrow),
+        ]
+    );
+    assert_eq!(
+        instructions[2].accounts[2].pubkey,
+        find_bundle_dispute_verifier_page_v2(program, escrow, 1)
+    );
+}
