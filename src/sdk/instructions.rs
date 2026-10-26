@@ -947,6 +947,34 @@ pub fn commit_auction_settlement_v2(
     }
 }
 
+/// Complete a deployed SmallV3 escrow with immediate verifier selection.
+pub fn commit_auction_settlement_small_v3(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    winner_vote_account: Pubkey,
+    auction_hash: [u8; 32],
+    winner_node_pubkey: Pubkey,
+) -> Instruction {
+    let mut instruction = commit_auction_settlement_v2(
+        target_program_id,
+        coordinator,
+        bundle_escrow,
+        winner_vote_account,
+        auction_hash,
+        winner_node_pubkey,
+        0,
+    );
+    instruction.accounts.extend([
+        AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+            false,
+        ),
+        AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+    ]);
+    instruction
+}
+
 pub fn commit_auction_settlement_v3(
     target_program_id: Pubkey,
     coordinator: Pubkey,
@@ -1304,6 +1332,11 @@ fn select_bundle_verifiers_v2(
         bundle_verification_dispute.map(|key| AccountMeta::new(key, false));
     let account_metas = SelectBundleVerifiersV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        auction_verifiers: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+            false,
+        ),
+        slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
         bundle_verification_dispute: bundle_verification_dispute.as_ref(),
     };
 
