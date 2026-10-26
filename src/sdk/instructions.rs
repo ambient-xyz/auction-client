@@ -26,8 +26,8 @@ use super::{
     find_auction, find_bundle_dispute_verifier_page_v2, find_bundle_registry,
     find_bundle_verification_dispute_v2, find_bundle_verifier_page_v2, find_child_bundle,
     find_config_policy_v2, init_bundle_plan, open_bundle_escrow_v4_plan,
-    open_priced_bundle_escrow_v4_plan, place_bid_plan, request_job_plan, reveal_bid_plan,
-    submit_job_plan,
+    open_priced_bundle_escrow_v4_plan, open_small_bundle_escrow_v4_plan, place_bid_plan,
+    request_job_plan, reveal_bid_plan, submit_job_plan,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -841,6 +841,34 @@ pub fn open_bundle_escrow_v4(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn open_small_bundle_escrow_v4(
+    target_program_id: Pubkey,
+    payer: Pubkey,
+    bundle_version: u32,
+    bundle_hash: [u8; 32],
+    coordinator: Pubkey,
+    requester_refund_recipient: Pubkey,
+    total_input_tokens: u64,
+    max_output_tokens: u64,
+    expected_page_count: u8,
+    winner_node_pubkey: Pubkey,
+) -> Instruction {
+    open_small_bundle_escrow_v4_plan(
+        target_program_id,
+        payer,
+        bundle_version,
+        bundle_hash,
+        coordinator,
+        requester_refund_recipient,
+        total_input_tokens,
+        max_output_tokens,
+        expected_page_count,
+        winner_node_pubkey,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn open_priced_bundle_escrow_v4(
     target_program_id: Pubkey,
     payer: Pubkey,
@@ -870,6 +898,24 @@ pub fn open_priced_bundle_escrow_v4(
         pricing_commitment,
     )
     .0
+}
+
+pub fn commit_small_auction_settlement_v4(
+    target_program_id: Pubkey,
+    coordinator: Pubkey,
+    bundle_escrow: Pubkey,
+    auction_hash: [u8; 32],
+) -> Instruction {
+    let account_metas = CommitSmallAuctionSettlementV4Accounts {
+        coordinator: &AccountMeta::new_readonly(coordinator, true),
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: CommitSmallAuctionSettlementV4Args { auction_hash }.to_bytes(),
+        accounts: account_metas.iter_owned().collect(),
+    }
 }
 
 pub fn commit_auction_settlement_v2(

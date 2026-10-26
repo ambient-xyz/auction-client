@@ -1621,3 +1621,39 @@ fn small_v4_claim_uses_only_fixed_unsigned_accounts() {
         ]
     );
 }
+
+#[test]
+fn small_v4_builders_store_the_winner_only_at_open() {
+    let program = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let winner = Pubkey::new_unique();
+    let (open, keys) = super::open_small_bundle_escrow_v4_plan(
+        program, payer, 7, [8; 32], payer, payer, 100, 200, 1, winner,
+    );
+    assert_eq!(
+        open,
+        super::open_small_bundle_escrow_v4(
+            program, payer, 7, [8; 32], payer, payer, 100, 200, 1, winner,
+        )
+    );
+    let args = ambient_auction_api::OpenSmallBundleEscrowV4Args::try_from(&open.data[1..]).unwrap();
+    assert_eq!(args.winner_node_pubkey, winner.to_bytes());
+    assert_eq!(open.data[0], 34);
+    assert_eq!(
+        keys.bundle_escrow,
+        super::find_bundle_escrow_v2(program, payer, [8; 32], 7)
+    );
+    assert_eq!(open.accounts.len(), 4);
+    assert!(!open.accounts[2].is_writable);
+    let commit =
+        super::commit_small_auction_settlement_v4(program, payer, keys.bundle_escrow, [9; 32]);
+    assert_eq!(commit.data, [vec![35], vec![9; 32]].concat());
+    assert_eq!(
+        commit.accounts,
+        vec![
+            solana_sdk::instruction::AccountMeta::new_readonly(payer, true),
+            solana_sdk::instruction::AccountMeta::new(keys.bundle_escrow, false),
+            solana_sdk::instruction::AccountMeta::new_readonly(keys.config_policy, false),
+        ]
+    );
+}
