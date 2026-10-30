@@ -17,6 +17,31 @@ use solana_sdk::{
 };
 use std::net::{IpAddr, Ipv4Addr};
 
+#[test]
+fn small_v3_settlement_preserves_v2_data_and_adds_readonly_selection_accounts() {
+    let program = Pubkey::new_unique();
+    let coordinator = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let vote = Pubkey::new_unique();
+    let winner = Pubkey::new_unique();
+    let ordinary =
+        commit_auction_settlement_v2(program, coordinator, escrow, vote, [7; 32], winner, 0);
+    let small =
+        commit_auction_settlement_small_v3(program, coordinator, escrow, vote, [7; 32], winner);
+    assert_eq!(small.data, ordinary.data);
+    assert_eq!(small.accounts[..4], ordinary.accounts);
+    assert_eq!(
+        small.accounts[4..],
+        [
+            AccountMeta::new_readonly(
+                Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+                false
+            ),
+            AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+        ]
+    );
+}
+
 fn sample_endpoint() -> (IpAddr, u16) {
     (IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000)
 }
@@ -424,21 +449,35 @@ fn verifier_selection_builders_use_initial_and_replacement_accounts() {
         initial.data,
         vec![AuctionInstruction::SelectBundleVerifiersV2 as u8]
     );
-    assert_eq!(initial.accounts.len(), 1);
+    assert_eq!(initial.accounts.len(), 3);
     assert_eq!(initial.accounts[0].pubkey, bundle_escrow);
     assert!(initial.accounts[0].is_writable);
     assert!(!initial.accounts[0].is_signer);
+    assert_eq!(
+        initial.accounts[1],
+        solana_sdk::instruction::AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+            false,
+        )
+    );
+    assert_eq!(
+        initial.accounts[2],
+        solana_sdk::instruction::AccountMeta::new_readonly(
+            solana_sdk::sysvar::slot_hashes::ID,
+            false,
+        )
+    );
 
     let replacement = select_replacement_bundle_verifiers_v2(program_id, bundle_escrow);
     assert_eq!(replacement.data, initial.data);
-    assert_eq!(replacement.accounts.len(), 2);
-    assert_eq!(replacement.accounts[0], initial.accounts[0]);
+    assert_eq!(replacement.accounts.len(), 4);
+    assert_eq!(replacement.accounts[..3], initial.accounts[..]);
     assert_eq!(
-        replacement.accounts[1].pubkey,
+        replacement.accounts[3].pubkey,
         find_bundle_verification_dispute_v2(program_id, bundle_escrow)
     );
-    assert!(replacement.accounts[1].is_writable);
-    assert!(!replacement.accounts[1].is_signer);
+    assert!(replacement.accounts[3].is_writable);
+    assert!(!replacement.accounts[3].is_signer);
 }
 
 #[test]
