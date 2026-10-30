@@ -1696,6 +1696,88 @@ fn replay_settings_builder_sends_the_104_byte_payload() {
 }
 
 #[test]
+fn replay_class_builders_use_the_class_pda_and_exact_access() {
+    let program = Pubkey::new_unique();
+    let node = Pubkey::new_unique();
+    let payer = Pubkey::new_unique();
+    let admin = Pubkey::new_unique();
+    let escrow = Pubkey::new_unique();
+    let class_id = [6; 32];
+    let class = Pubkey::find_program_address(
+        &[ambient_auction_api::REPLAY_CLASS_V1_SEED, class_id.as_ref()],
+        &program,
+    )
+    .0;
+    assert_eq!(class, find_replay_class_v1(program, class_id));
+    let policy = find_config_policy_v2(program);
+    let system = Pubkey::new_from_array(solana_system_interface::program::ID.to_bytes());
+
+    let join = join_replay_class_v1(program, node, payer, class_id);
+    assert_eq!(join.data[0], AuctionInstruction::JoinReplayClassV1 as u8);
+    assert_eq!(&join.data[1..], &class_id);
+    assert_eq!(
+        join.accounts,
+        [
+            AccountMeta::new_readonly(node, true),
+            AccountMeta::new(payer, true),
+            AccountMeta::new(class, false),
+            AccountMeta::new_readonly(policy, false),
+            AccountMeta::new_readonly(system, false),
+        ]
+    );
+
+    let leave = leave_replay_class_v1(program, node, class_id);
+    assert_eq!(leave.data[0], AuctionInstruction::LeaveReplayClassV1 as u8);
+    assert_eq!(
+        leave.accounts,
+        [
+            AccountMeta::new_readonly(node, true),
+            AccountMeta::new(class, false)
+        ]
+    );
+
+    let remove = remove_replay_class_member_v1(program, admin, class_id, node);
+    assert_eq!(
+        remove.data[0],
+        AuctionInstruction::RemoveReplayClassMemberV1 as u8
+    );
+    assert_eq!(&remove.data[33..], node.as_ref());
+    assert_eq!(
+        remove.accounts,
+        [
+            AccountMeta::new_readonly(admin, true),
+            AccountMeta::new(class, false),
+            AccountMeta::new_readonly(policy, false),
+        ]
+    );
+
+    for replacement in [false, true] {
+        let select = select_replay_verifiers_v1(program, escrow, class_id, replacement);
+        assert_eq!(
+            select.data,
+            [AuctionInstruction::SelectReplayVerifiersV1 as u8]
+        );
+        let mut expected = vec![
+            AccountMeta::new(escrow, false),
+            AccountMeta::new_readonly(
+                Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+                false,
+            ),
+            AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+            AccountMeta::new_readonly(class, false),
+            AccountMeta::new_readonly(policy, false),
+        ];
+        if replacement {
+            expected.push(AccountMeta::new(
+                find_bundle_verification_dispute_v2(program, escrow),
+                false,
+            ));
+        }
+        assert_eq!(select.accounts, expected);
+    }
+}
+
+#[test]
 fn small_v4_builders_store_the_winner_only_at_open() {
     let program = Pubkey::new_unique();
     let payer = Pubkey::new_unique();

@@ -1418,6 +1418,115 @@ pub fn select_replacement_bundle_verifiers_v2(
     )
 }
 
+/// Verifier selection for an exact-replay escrow: the draw of `select_*_bundle_verifiers_v2`, restricted to the
+/// members of the policy's replay class. Pass the dispute for a replacement draw.
+pub fn select_replay_verifiers_v1(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    class_id: [u8; 32],
+    replacement: bool,
+) -> Instruction {
+    let dispute = replacement.then(|| {
+        AccountMeta::new(
+            find_bundle_verification_dispute_v2(target_program_id, bundle_escrow),
+            false,
+        )
+    });
+    let account_metas = SelectReplayVerifiersV1Accounts {
+        bundle_escrow: &AccountMeta::new(bundle_escrow, false),
+        auction_verifiers: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+            false,
+        ),
+        slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
+        replay_class: &AccountMeta::new_readonly(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+        bundle_verification_dispute: dispute.as_ref(),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: SelectReplayVerifiersV1Args {}.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// A node joins the policy's replay class; `payer` funds the class account on the first join.
+pub fn join_replay_class_v1(
+    target_program_id: Pubkey,
+    node: Pubkey,
+    payer: Pubkey,
+    class_id: [u8; 32],
+) -> Instruction {
+    let account_metas = JoinReplayClassV1Accounts {
+        node: &AccountMeta::new_readonly(node, true),
+        payer: &AccountMeta::new(payer, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: JoinReplayClassV1Args { class_id }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// A member leaves its replay class.
+pub fn leave_replay_class_v1(
+    target_program_id: Pubkey,
+    node: Pubkey,
+    class_id: [u8; 32],
+) -> Instruction {
+    let account_metas = LeaveReplayClassV1Accounts {
+        node: &AccountMeta::new_readonly(node, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: LeaveReplayClassV1Args { class_id }.to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
+/// An admin removes a member from a replay class.
+pub fn remove_replay_class_member_v1(
+    target_program_id: Pubkey,
+    admin: Pubkey,
+    class_id: [u8; 32],
+    member: Pubkey,
+) -> Instruction {
+    let account_metas = RemoveReplayClassMemberV1Accounts {
+        admin: &AccountMeta::new_readonly(admin, true),
+        replay_class: &AccountMeta::new(
+            super::find_replay_class_v1(target_program_id, class_id),
+            false,
+        ),
+        config_policy: &AccountMeta::new_readonly(find_config_policy_v2(target_program_id), false),
+    };
+    Instruction {
+        program_id: target_program_id,
+        data: RemoveReplayClassMemberV1Args {
+            class_id,
+            member: member.to_bytes().into(),
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
 /// The winner and mint come from the escrow. The program enforces both values.
 pub fn claim_small_credits_v4(
     target_program_id: Pubkey,
