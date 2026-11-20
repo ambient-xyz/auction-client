@@ -1300,6 +1300,10 @@ pub fn dispute_bundle_verification_v2(
     let bundle_verification_dispute =
         find_bundle_verification_dispute_v2(target_program_id, bundle_escrow);
     let config_policy = find_config_policy_v2(target_program_id);
+    let history = AccountMeta::new_readonly(
+        Pubkey::new_from_array(ambient_auction_api::AUCTION_VERIFIERS_HISTORY_ID),
+        false,
+    );
     let account_metas = DisputeBundleVerificationV2Accounts {
         dispute_payer: &AccountMeta::new(dispute_payer, true),
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
@@ -1310,6 +1314,8 @@ pub fn dispute_bundle_verification_v2(
             Pubkey::new_from_array(system_program::ID.to_bytes()),
             false,
         ),
+        auction_verifiers: (kind == BundleVerificationDisputeV2Kind::PaidVerdictDispute)
+            .then_some(&history),
     };
 
     Instruction {
@@ -1326,10 +1332,9 @@ pub fn dispute_bundle_verification_v2(
 fn select_bundle_verifiers_v2(
     target_program_id: Pubkey,
     bundle_escrow: Pubkey,
-    bundle_verification_dispute: Option<Pubkey>,
+    selection_account: Option<Pubkey>,
 ) -> Instruction {
-    let bundle_verification_dispute =
-        bundle_verification_dispute.map(|key| AccountMeta::new(key, false));
+    let selection_account = selection_account.map(|key| AccountMeta::new(key, false));
     let account_metas = SelectBundleVerifiersV2Accounts {
         bundle_escrow: &AccountMeta::new(bundle_escrow, false),
         auction_verifiers: &AccountMeta::new_readonly(
@@ -1337,7 +1342,7 @@ fn select_bundle_verifiers_v2(
             false,
         ),
         slot_hashes: &AccountMeta::new_readonly(solana_sdk::sysvar::slot_hashes::ID, false),
-        bundle_verification_dispute: bundle_verification_dispute.as_ref(),
+        selection_account: selection_account.as_ref(),
     };
 
     Instruction {
@@ -1352,6 +1357,19 @@ pub fn select_initial_bundle_verifiers_v2(
     bundle_escrow: Pubkey,
 ) -> Instruction {
     select_bundle_verifiers_v2(target_program_id, bundle_escrow, None)
+}
+
+/// Select a full committee or refund the escrow to its stored requester.
+pub fn select_initial_with_refund_v2(
+    target_program_id: Pubkey,
+    bundle_escrow: Pubkey,
+    requester_refund_recipient: Pubkey,
+) -> Instruction {
+    select_bundle_verifiers_v2(
+        target_program_id,
+        bundle_escrow,
+        Some(requester_refund_recipient),
+    )
 }
 
 pub fn select_replacement_bundle_verifiers_v2(
