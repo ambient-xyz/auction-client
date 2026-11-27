@@ -4,7 +4,7 @@ use ambient_auction_api::{
     AUCTION_SEED, BID_SEED, BUNDLE_DISPUTE_VERIFIER_PAGE_V2_SEED, BUNDLE_ESCROW_V2_SEED,
     BUNDLE_REGISTRY_SEED, BUNDLE_VERIFICATION_DISPUTE_V2_SEED, BUNDLE_VERIFIER_PAGE_V2_SEED,
     CONFIG_POLICY_V2_SEED, CONFIG_SEED, JOB_REQUEST_SEED, PUBKEY_BYTES, REPLAY_ANCHOR_V1_SEED,
-    REQUEST_BUNDLE_SEED,
+    REPLAY_CLASS_V1_SEED, REQUEST_BUNDLE_SEED,
 };
 use solana_sdk::pubkey::{MAX_SEED_LEN, Pubkey};
 
@@ -189,6 +189,15 @@ pub fn find_replay_anchor_v1(
     let miner_node = miner_node.to_client_pubkey();
     Pubkey::find_program_address(
         &[REPLAY_ANCHOR_V1_SEED, miner_node.as_ref(), engine.as_ref()],
+        &target_program_id,
+    )
+    .0
+}
+
+/// The member list of a replay class (`class_id` is SHA-256 of the class name).
+pub fn find_replay_class_v1(target_program_id: Pubkey, class_id: [u8; 32]) -> Pubkey {
+    Pubkey::find_program_address(
+        &[REPLAY_CLASS_V1_SEED, class_id.as_ref()],
         &target_program_id,
     )
     .0

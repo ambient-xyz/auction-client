@@ -27,7 +27,7 @@ dependencies = [
 [[package]]
 name = "ambient-auction-api"
 version = "0.1.0"
-source = "git+https://github.com/ambient-xyz/auction-api?rev=c7bac44a4b05d77a957ccdfc64e56a41c5ec9c80#c7bac44a4b05d77a957ccdfc64e56a41c5ec9c80"
+source = "git+https://github.com/ambient-xyz/auction-api?rev=0ffb7b2375eadb54955056c7f5c176d7ba19a31b#0ffb7b2375eadb54955056c7f5c176d7ba19a31b"
 dependencies = [
  "bytemuck",
  "five8_const 1.0.0",
