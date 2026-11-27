@@ -718,6 +718,56 @@ pub fn set_config_policy_v2_small_credit_settings(
     )
 }
 
+/// Replace the exact-replay policy (patch kind 8). `ReplayPolicyV1::default()` turns exact replay off.
+pub fn set_config_policy_v2_replay_settings(
+    target_program_id: Pubkey,
+    authority: Pubkey,
+    replay: ambient_auction_api::ReplayPolicyV1,
+) -> Instruction {
+    set_config_policy_v2_with_args(
+        target_program_id,
+        authority,
+        SetConfigPolicyReplayV1Args {
+            patch_kind: ConfigPolicyV2PatchKind::REPLAY_SETTINGS,
+            _reserved0: [0; 7],
+            replay,
+        },
+    )
+}
+
+/// Anchor the SHA-256 of an engine's span commit (exact replay). `engine` is SHA-256 of the engine id; the miner's
+/// node key signs, and `payer` funds the anchor account on the first anchor.
+pub fn anchor_replay_spans_v1(
+    target_program_id: Pubkey,
+    miner_node: Pubkey,
+    payer: Pubkey,
+    engine: [u8; 32],
+    span_id: u64,
+    commit_sha256: [u8; 32],
+) -> Instruction {
+    let replay_anchor = super::find_replay_anchor_v1(target_program_id, miner_node, engine);
+    let account_metas = AnchorReplaySpansV1Accounts {
+        miner_node: &AccountMeta::new_readonly(miner_node, true),
+        payer: &AccountMeta::new(payer, true),
+        replay_anchor: &AccountMeta::new(replay_anchor, false),
+        system_program: &AccountMeta::new_readonly(
+            Pubkey::new_from_array(system_program::ID.to_bytes()),
+            false,
+        ),
+    };
+
+    Instruction {
+        program_id: target_program_id,
+        data: AnchorReplaySpansV1Args {
+            engine,
+            span_id,
+            commit_sha256,
+        }
+        .to_bytes(),
+        accounts: account_metas.iter_owned().collect::<Vec<_>>(),
+    }
+}
+
 pub fn set_config_policy_v2_small_credit_slash_authority(
     target_program_id: Pubkey,
     authority: Pubkey,
